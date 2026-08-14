@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: codesync-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: codesync
+      POSTGRES_USER: codesync
+      POSTGRES_PASSWORD: codesync_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codesync -d codesync"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: codesync-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:
