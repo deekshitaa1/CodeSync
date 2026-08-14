@@ -1,0 +1,49 @@
+{
+	"name": "which-command",
+	"version": "0.1.0",
+	"description": "Find the absolute path to a command's executable, like the Unix `which` command",
+	"license": "MIT",
+	"repository": "sindresorhus/which-command",
+	"funding": "https://github.com/sindresorhus/which-command?sponsor=1",
+	"author": {
+		"name": "Sindre Sorhus",
+		"email": "sindresorhus@gmail.com",
+		"url": "https://sindresorhus.com"
+	},
+	"type": "module",
+	"bin": "./cli.js",
+	"exports": {
+		"types": "./index.d.ts",
+		"default": "./index.js"
+	},
+	"sideEffects": false,
+	"engines": {
+		"node": ">=22"
+	},
+	"scripts": {
+		"test": "xo && node --test"
+	},
+	"files": [
+		"index.js",
+		"index.d.ts",
+		"cli.js"
+	],
+	"keywords": [
+		"which",
+		"where",
+		"command",
+		"executable",
+		"binary",
+		"path",
+		"find",
+		"locate",
+		"resolve",
+		"lookup",
+		"unix",
+		"cli",
+		"bin"
+	],
+	"devDependencies": {
+		"xo": "^3.0.2"
+	}
+}

@@ -1,0 +1,50 @@
+import process from 'node:process';
+import {sendMessage} from './send.js';
+import {getOneMessage} from './get-one.js';
+import {getEachMessage} from './get-each.js';
+import {getCancelSignal} from './graceful.js';
+
+// Add promise-based IPC methods in current process
+export const addIpcMethods = (target, subprocess, {ipc}) => {
+	Object.assign(target, getIpcMethods(subprocess, false, ipc, target));
+};
+
+// Get promise-based IPC in the subprocess
+export const getIpcExport = () => {
+	const anyProcess = process;
+	const isSubprocess = true;
+	const isIpc = process.channel !== undefined;
+
+	return {
+		...getIpcMethods(anyProcess, isSubprocess, isIpc),
+		getCancelSignal: getCancelSignal.bind(undefined, {
+			anyProcess,
+			channel: anyProcess.channel,
+			isSubprocess,
+			ipc: isIpc,
+		}),
+	};
+};
+
+// Retrieve the `ipc` shared by both the current process and the subprocess
+const getIpcMethods = (anyProcess, isSubprocess, ipc, waitProcess = anyProcess) => ({
+	sendMessage: sendMessage.bind(undefined, {
+		anyProcess,
+		channel: anyProcess.channel,
+		isSubprocess,
+		ipc,
+	}),
+	getOneMessage: getOneMessage.bind(undefined, {
+		anyProcess,
+		channel: anyProcess.channel,
+		isSubprocess,
+		ipc,
+	}),
+	getEachMessage: getEachMessage.bind(undefined, {
+		anyProcess,
+		channel: anyProcess.channel,
+		isSubprocess,
+		ipc,
+		waitProcess,
+	}),
+});
