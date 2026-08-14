@@ -8,114 +8,99 @@ import {
   Folder,
   FileCode2,
   Play,
-  Copy,
   Check,
   Terminal,
   X,
-  ShieldCheck,
-  Lock,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import "./App.css";
-
-type Language = "python" | "javascript";
-
-type FileItem = {
-  name: string;
-  language: Language;
-  content: string;
-};
 
 type User = {
   id: string;
   name: string;
 };
 
-type ServerMessage = {
-  type?: string;
-  message?: string;
-  room?: string;
-  clientId?: string;
-  code?: string;
-  language?: string;
-  users?: User[];
-  result?: unknown;
+type RunResult = {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  success: boolean;
 };
 
-const API_BASE = "http://localhost:4000";
+type ServerMessage = {
+  type:
+    | "connected"
+    | "state"
+    | "code-change"
+    | "users"
+    | "run-result"
+    | "error";
+
+  clientId?: string;
+
+  code?: string;
+
+  users?: User[];
+
+  senderId?: string;
+
+  result?: RunResult;
+
+  message?: string;
+};
+
 const WS_URL = "ws://localhost:4000/collaboration";
 
-const INITIAL_FILES: FileItem[] = [
-  {
-    name: "main.py",
-    language: "python",
-    content: `def hello():
+const INITIAL_CODE = `def hello():
     print("Hello from CodeSync!")
 
 hello()
-`,
-  },
-];
+`;
 
 function App() {
-  /* ========================================================
-     FILE STATE
-  ======================================================== */
+  /*
+   * ======================================================
+   * USER
+   * ======================================================
+   */
 
-  const [files, setFiles] =
-    useState<FileItem[]>(INITIAL_FILES);
+  const [nameInput, setNameInput] = useState("");
 
-  const [activeFile, setActiveFile] =
-    useState("main.py");
+  const [name, setName] = useState("");
 
-  /* ========================================================
-     ROOM STATE
-  ======================================================== */
+  /*
+   * ======================================================
+   * SHARED CODE
+   * ======================================================
+   */
 
-  const [room, setRoom] =
-    useState("");
+  const [code, setCode] =
+    useState<string>(INITIAL_CODE);
 
-  const [secret, setSecret] =
-    useState("");
-
-  const [name, setName] =
-    useState("");
-
-  const [roomInput, setRoomInput] =
-    useState("");
-
-  const [secretInput, setSecretInput] =
-    useState("");
-
-  const [nameInput, setNameInput] =
-    useState("");
-
-  const [joined, setJoined] =
-    useState(false);
-
-  const [creating, setCreating] =
-    useState(false);
-
-  const [joinError, setJoinError] =
-    useState("");
-
-  const [createdSecret, setCreatedSecret] =
-    useState("");
-
-  /* ========================================================
-     UI STATE
-  ======================================================== */
-
-  const [copied, setCopied] =
-    useState(false);
-
-  const [connected, setConnected] =
-    useState(false);
+  /*
+   * ======================================================
+   * COLLABORATORS
+   * ======================================================
+   */
 
   const [users, setUsers] =
     useState<User[]>([]);
 
-  const [showSettings, setShowSettings] =
+  /*
+   * ======================================================
+   * CONNECTION
+   * ======================================================
+   */
+
+  const [connected, setConnected] =
     useState(false);
+
+  /*
+   * ======================================================
+   * TERMINAL
+   * ======================================================
+   */
 
   const [terminalOpen, setTerminalOpen] =
     useState(true);
@@ -125,43 +110,78 @@ function App() {
 
   const [output, setOutput] =
     useState(
-      "CodeSync terminal ready.\nRun your code to see output."
+      "CodeSync terminal ready.\n\nClick Run to execute main.py."
     );
+
+  /*
+   * ======================================================
+   * UI
+   * ======================================================
+   */
+
+  const [copied, setCopied] =
+    useState(false);
+
+  const [showSettings, setShowSettings] =
+    useState(false);
+
+  /*
+   * ======================================================
+   * WEBSOCKET
+   * ======================================================
+   */
 
   const socketRef =
     useRef<WebSocket | null>(null);
 
-  /* ========================================================
-     CURRENT FILE
-  ======================================================== */
+  const clientIdRef =
+    useRef("");
 
-  const currentFile =
-    files.find(
-      (file) =>
-        file.name === activeFile
-    );
+  /*
+   * Prevent a remote code update from
+   * being sent back to the server.
+   */
 
-  /* ========================================================
-     WEBSOCKET
-  ======================================================== */
+  const remoteUpdateRef =
+    useRef(false);
+
+  /*
+   * ======================================================
+   * LOGIN
+   * ======================================================
+   */
+
+  const handleJoin = () => {
+    const cleanName =
+      nameInput.trim();
+
+    if (!cleanName) {
+      return;
+    }
+
+    setName(cleanName);
+  };
+
+  /*
+   * ======================================================
+   * WEBSOCKET CONNECTION
+   * ======================================================
+   */
 
   useEffect(() => {
-    if (
-      !joined ||
-      !room ||
-      !name
-    ) {
+    if (!name) {
       return;
     }
 
     const socket =
       new WebSocket(WS_URL);
 
-    socketRef.current = socket;
+    socketRef.current =
+      socket;
 
     socket.onopen = () => {
       console.log(
-        "Connected to CodeSync WebSocket"
+        "CodeSync WebSocket connected"
       );
 
       setConnected(true);
@@ -169,8 +189,6 @@ function App() {
       socket.send(
         JSON.stringify({
           type: "join",
-          room,
-          secret,
           name,
         })
       );
@@ -184,100 +202,92 @@ function App() {
           ) as ServerMessage;
 
         console.log(
-          "WebSocket message:",
+          "CodeSync message:",
           message
         );
 
-        /* ----------------------------------------------
-           JOINED
-        ---------------------------------------------- */
+        /*
+         * ==================================================
+         * CLIENT ID
+         * ==================================================
+         */
 
         if (
-          message.type === "joined"
+          message.type ===
+          "connected"
         ) {
-          setConnected(true);
+          if (
+            message.clientId
+          ) {
+            clientIdRef.current =
+              message.clientId;
+          }
 
+          return;
+        }
+
+        /*
+         * ==================================================
+         * INITIAL ROOM STATE
+         * ==================================================
+         */
+
+        if (
+          message.type ===
+          "state"
+        ) {
           if (
             typeof message.code ===
             "string"
           ) {
-            setFiles(
-              (currentFiles) =>
-                currentFiles.map(
-                  (file) =>
-                    file.name ===
-                    activeFile
-                      ? {
-                          ...file,
-                          content:
-                            message.code!,
-                        }
-                      : file
-                )
+            remoteUpdateRef.current =
+              true;
+
+            setCode(
+              message.code
+            );
+
+            setOutput(
+              "CodeSync terminal ready.\n\nShared code loaded."
+            );
+
+            window.setTimeout(
+              () => {
+                remoteUpdateRef.current =
+                  false;
+              },
+              0
+            );
+          }
+
+          if (
+            message.users
+          ) {
+            setUsers(
+              message.users
             );
           }
 
           return;
         }
 
-        /* ----------------------------------------------
-           ROOM CREATED
-        ---------------------------------------------- */
-
-        if (
-          message.type ===
-          "room-created"
-        ) {
-          setConnected(true);
-
-          if (
-            typeof message.code ===
-            "string"
-          ) {
-            setFiles(
-              (currentFiles) =>
-                currentFiles.map(
-                  (file) =>
-                    file.name ===
-                    activeFile
-                      ? {
-                          ...file,
-                          content:
-                            message.code!,
-                        }
-                      : file
-                )
-            );
-          }
-
-          return;
-        }
-
-        /* ----------------------------------------------
-           ERROR
-        ---------------------------------------------- */
-
-        if (
-          message.type === "error" ||
-          message.type ===
-            "join-error"
-        ) {
-          setJoinError(
-            message.message ||
-              "Unable to connect to room."
-          );
-
-          return;
-        }
-
-        /* ----------------------------------------------
-           CODE CHANGE
-        ---------------------------------------------- */
+        /*
+         * ==================================================
+         * CODE CHANGE FROM ANOTHER USER
+         * ==================================================
+         */
 
         if (
           message.type ===
           "code-change"
         ) {
+          if (
+            message.senderId ===
+            clientIdRef.current
+          ) {
+            return;
+          }
+
           if (
             typeof message.code !==
             "string"
@@ -285,30 +295,45 @@ function App() {
             return;
           }
 
-          setFiles(
-            (currentFiles) =>
-              currentFiles.map(
-                (file) =>
-                  file.name ===
-                  activeFile
-                    ? {
-                        ...file,
-                        content:
-                          message.code!,
-                      }
-                    : file
-              )
+          remoteUpdateRef.current =
+            true;
+
+          setCode(
+            message.code
+          );
+
+          /*
+           * IMPORTANT:
+           * Whenever another user edits,
+           * this user's terminal is cleared.
+           */
+
+          setOutput(
+            "Code changed by a collaborator.\n\nTerminal cleared.\nClick Run to execute the latest code."
+          );
+
+          setRunning(false);
+
+          window.setTimeout(
+            () => {
+              remoteUpdateRef.current =
+                false;
+            },
+            0
           );
 
           return;
         }
 
-        /* ----------------------------------------------
-           USERS
-        ---------------------------------------------- */
+        /*
+         * ==================================================
+         * USERS
+         * ==================================================
+         */
 
         if (
-          message.type === "users"
+          message.type ===
+          "users"
         ) {
           setUsers(
             message.users ?? []
@@ -317,45 +342,86 @@ function App() {
           return;
         }
 
-        /* ----------------------------------------------
-           LANGUAGE CHANGE
-        ---------------------------------------------- */
+        /*
+         * ==================================================
+         * RUN RESULT
+         * ==================================================
+         */
 
         if (
           message.type ===
-          "language-change"
+          "run-result"
         ) {
           if (
-            typeof message.language !==
-              "string" ||
-            typeof message.code !==
-              "string"
+            !message.result
           ) {
             return;
           }
 
-          const newLanguage =
-            message.language ===
-            "javascript"
-              ? "javascript"
-              : "python";
+          const result =
+            message.result;
 
-          setFiles(
-            (currentFiles) =>
-              currentFiles.map(
-                (file) =>
-                  file.name ===
-                  activeFile
-                    ? {
-                        ...file,
-                        language:
-                          newLanguage,
-                        content:
-                          message.code!,
-                      }
-                    : file
-              )
+          let terminalOutput =
+            `$ python main.py\n\n`;
+
+          if (
+            result.stdout
+          ) {
+            terminalOutput +=
+              result.stdout;
+          }
+
+          if (
+            result.stderr
+          ) {
+            terminalOutput +=
+              `\n\n[stderr]\n${result.stderr}`;
+          }
+
+          if (
+            !result.stdout &&
+            !result.stderr
+          ) {
+            terminalOutput +=
+              "(no output)";
+          }
+
+          terminalOutput +=
+            `\n\nExit code: ${
+              result.exitCode ?? 0
+            }`;
+
+          setOutput(
+            terminalOutput
           );
+
+          setRunning(false);
+
+          return;
+        }
+
+        /*
+         * ==================================================
+         * ERROR
+         * ==================================================
+         */
+
+        if (
+          message.type ===
+          "error"
+        ) {
+          console.error(
+            message.message
+          );
+
+          setOutput(
+            `Server error:\n\n${
+              message.message ??
+              "Unknown error"
+            }`
+          );
+
+          setRunning(false);
 
           return;
         }
@@ -375,7 +441,9 @@ function App() {
       setConnected(false);
     };
 
-    socket.onerror = (error) => {
+    socket.onerror = (
+      error
+    ) => {
       console.error(
         "WebSocket error:",
         error
@@ -386,38 +454,54 @@ function App() {
 
     return () => {
       socket.close();
-      socketRef.current = null;
+
+      socketRef.current =
+        null;
     };
-  }, [
-    joined,
-    room,
-    secret,
-    name,
-    activeFile,
-  ]);
+  }, [name]);
 
-  /* ========================================================
-     UPDATE CODE
-  ======================================================== */
+  /*
+   * ======================================================
+   * CODE CHANGE
+   * ======================================================
+   */
 
-  const updateCode = (
-    value: string | undefined
+  const handleCodeChange = (
+    value:
+      | string
+      | undefined
   ) => {
     const newCode =
       value ?? "";
 
-    setFiles(
-      (currentFiles) =>
-        currentFiles.map(
-          (file) =>
-            file.name === activeFile
-              ? {
-                  ...file,
-                  content: newCode,
-                }
-              : file
-        )
+    setCode(
+      newCode
     );
+
+    /*
+     * If this update came from
+     * another collaborator, don't
+     * broadcast it again.
+     */
+
+    if (
+      remoteUpdateRef.current
+    ) {
+      return;
+    }
+
+    /*
+     * Every local edit clears
+     * the local terminal.
+     */
+
+    setOutput(
+      "Code modified.\n\nTerminal cleared.\nClick Run to execute the latest code."
+    );
+
+    /*
+     * Send the new code to server.
+     */
 
     const socket =
       socketRef.current;
@@ -429,370 +513,92 @@ function App() {
     ) {
       socket.send(
         JSON.stringify({
-          type: "code-change",
-          code: newCode,
+          type:
+            "code-change",
+
+          code:
+            newCode,
         })
       );
     }
   };
 
-  /* ========================================================
-     CREATE ROOM
-  ======================================================== */
+  /*
+   * ======================================================
+   * RUN REAL PYTHON CODE
+   * ======================================================
+   */
 
-  const handleCreateRoom =
-    async () => {
-      setCreating(true);
-      setJoinError("");
+  const handleRun = () => {
+    const socket =
+      socketRef.current;
 
-      try {
-        /*
-         * Backend endpoint:
-         * POST /api/rooms
-         */
-
-        const response =
-          await fetch(
-            `${API_BASE}/api/rooms`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type":
-                  "application/json",
-              },
-              body: JSON.stringify({
-                room:
-                  `room-${Math.random()
-                    .toString(36)
-                    .substring(2, 8)}`,
-                language:
-                  "python",
-              }),
-            }
-          );
-
-        const data =
-          await response.json();
-
-        if (!response.ok) {
-          throw new Error(
-            data.error ||
-              "Room creation failed."
-          );
-        }
-
-        /*
-         * Your current backend returns:
-         * data.room
-         *
-         * not data.roomId.
-         */
-
-        const createdRoom =
-          data.room;
-
-        if (
-          typeof createdRoom !==
-          "string"
-        ) {
-          throw new Error(
-            "Server did not return a room ID."
-          );
-        }
-
-        setRoomInput(
-          createdRoom
-        );
-
-        /*
-         * Current backend does not
-         * return a secret.
-         *
-         * Keep this empty for now.
-         */
-        setCreatedSecret("");
-
-        setJoinError(
-          "Room created. Enter your name and join using the Room ID."
-        );
-      } catch (error) {
-        console.error(
-          "Create room error:",
-          error
-        );
-
-        setJoinError(
-          error instanceof Error
-            ? error.message
-            : "Cannot create room. Make sure the CodeSync server is running."
-        );
-      } finally {
-        setCreating(false);
-      }
-    };
-
-  /* ========================================================
-     JOIN ROOM
-  ======================================================== */
-
-  const handleJoin =
-    () => {
-      const cleanName =
-        nameInput.trim();
-
-      const cleanRoom =
-        roomInput.trim();
-
-      const cleanSecret =
-        secretInput.trim();
-
-      setJoinError("");
-
-      if (
-        !cleanName ||
-        !cleanRoom
-      ) {
-        setJoinError(
-          "Name and Room ID are required."
-        );
-
-        return;
-      }
-
-      /*
-       * Secret is currently optional
-       * because the backend version being
-       * used does not authenticate it.
-       */
-
-      setName(cleanName);
-      setRoom(cleanRoom);
-      setSecret(cleanSecret);
-
-      setJoined(true);
-    };
-
-  /* ========================================================
-     SHARE ROOM
-  ======================================================== */
-
-  const handleShare =
-    async () => {
-      if (!room) {
-        return;
-      }
-
-      const url =
-        `${window.location.origin}/?room=${encodeURIComponent(
-          room
-        )}`;
-
-      try {
-        await navigator.clipboard.writeText(
-          url
-        );
-
-        setCopied(true);
-
-        window.setTimeout(
-          () =>
-            setCopied(false),
-          2000
-        );
-      } catch {
-        window.prompt(
-          "Copy this private room link:",
-          url
-        );
-      }
-    };
-
-  /* ========================================================
-     COPY SECRET
-  ======================================================== */
-
-  const handleCopySecret =
-    async () => {
-      if (!createdSecret) {
-        return;
-      }
-
-      try {
-        await navigator.clipboard.writeText(
-          createdSecret
-        );
-
-        setCopied(true);
-
-        window.setTimeout(
-          () =>
-            setCopied(false),
-          2000
-        );
-      } catch {
-        console.error(
-          "Unable to copy secret."
-        );
-      }
-    };
-
-  /* ========================================================
-     RUN CODE
-  ======================================================== */
-
-  const handleRun =
-    async () => {
-      if (!currentFile) {
-        return;
-      }
-
-      setTerminalOpen(true);
-      setRunning(true);
-
+    if (
+      !socket ||
+      socket.readyState !==
+        WebSocket.OPEN
+    ) {
       setOutput(
-        `$ Running ${activeFile}...\n\n`
+        "Not connected to CodeSync server."
       );
 
-      try {
-        const response =
-          await fetch(
-            `${API_BASE}/api/execute`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type":
-                  "application/json",
-              },
-              body: JSON.stringify({
-                language:
-                  currentFile.language,
-                code:
-                  currentFile.content,
-              }),
-            }
-          );
+      return;
+    }
 
-        const data =
-          await response.json();
+    setTerminalOpen(true);
 
-        if (!response.ok) {
-          setOutput(
-            `Execution failed.\n\n${
-              data.stderr ||
-              data.error ||
-              "Unknown server error."
-            }`
-          );
+    setRunning(true);
 
-          return;
-        }
+    setOutput(
+      "$ python main.py\n\nRunning..."
+    );
 
-        let terminalText =
-          `$ ${currentFile.language} ${activeFile}\n\n`;
+    socket.send(
+      JSON.stringify({
+        type: "run",
+        code,
+      })
+    );
+  };
 
-        if (
-          data.stdout
-        ) {
-          terminalText +=
-            data.stdout;
-        }
+  /*
+   * ======================================================
+   * SHARE CURRENT URL
+   * ======================================================
+   */
 
-        if (
-          data.stderr
-        ) {
-          terminalText +=
-            `\n\n[stderr]\n${data.stderr}`;
-        }
+  const handleShare = async () => {
+    try {
+      await navigator.clipboard.writeText(
+        window.location.href
+      );
 
-        if (
-          !data.stdout &&
-          !data.stderr
-        ) {
-          terminalText +=
-            "(no output)";
-        }
+      setCopied(true);
 
-        terminalText +=
-          `\n\nExit code: ${
-            data.exitCode ?? 0
-          }`;
+      window.setTimeout(
+        () => {
+          setCopied(false);
+        },
+        2000
+      );
+    } catch {
+      window.prompt(
+        "Copy this CodeSync link:",
+        window.location.href
+      );
+    }
+  };
 
-        setOutput(
-          terminalText
-        );
+  /*
+   * ======================================================
+   * LOGIN SCREEN
+   * ======================================================
+   */
 
-        /*
-         * Share execution result
-         * with collaborators.
-         */
-
-        const socket =
-          socketRef.current;
-
-        if (
-          socket &&
-          socket.readyState ===
-            WebSocket.OPEN
-        ) {
-          socket.send(
-            JSON.stringify({
-              type:
-                "run-result",
-              result: {
-                language:
-                  currentFile.language,
-                file:
-                  currentFile.name,
-                stdout:
-                  data.stdout ??
-                  "",
-                stderr:
-                  data.stderr ??
-                  "",
-                exitCode:
-                  data.exitCode ??
-                  0,
-                success:
-                  data.success ??
-                  false,
-              },
-            })
-          );
-        }
-      } catch (error) {
-        console.error(
-          "Execution error:",
-          error
-        );
-
-        setOutput(
-          `Unable to connect to CodeSync execution server.
-
-Make sure the backend is running at:
-
-${API_BASE}
-
-Error:
-${
-  error instanceof Error
-    ? error.message
-    : "Unknown error"
-}`
-        );
-      } finally {
-        setRunning(false);
-      }
-    };
-
-  /* ========================================================
-     JOIN SCREEN
-  ======================================================== */
-
-  if (!joined) {
+  if (!name) {
     return (
       <div className="join-screen">
         <div className="join-card">
-
           <div className="join-logo">
             <Code2 size={30} />
           </div>
@@ -802,17 +608,16 @@ ${
           </h1>
 
           <p className="join-subtitle">
-            Secure real-time collaborative
-            development workspace
+            Real-time collaborative
+            coding workspace
           </p>
 
           <div className="security-badge">
-            <ShieldCheck size={15} />
-            Private collaborative rooms
+            <Users size={15} />
+            Shared collaborative room
           </div>
 
           <div className="join-form">
-
             <label>
               Your name
             </label>
@@ -824,43 +629,17 @@ ${
                   event.target.value
                 )
               }
+              onKeyDown={(event) => {
+                if (
+                  event.key ===
+                  "Enter"
+                ) {
+                  handleJoin();
+                }
+              }}
               placeholder="e.g. Deekshita"
+              autoFocus
             />
-
-            <label>
-              Room ID
-            </label>
-
-            <input
-              value={roomInput}
-              onChange={(event) =>
-                setRoomInput(
-                  event.target.value
-                )
-              }
-              placeholder="Enter room ID"
-            />
-
-            <label>
-              Secret key
-            </label>
-
-            <input
-              type="password"
-              value={secretInput}
-              onChange={(event) =>
-                setSecretInput(
-                  event.target.value
-                )
-              }
-              placeholder="Optional for current server"
-            />
-
-            {joinError && (
-              <div className="join-error">
-                {joinError}
-              </div>
-            )}
 
             <button
               className="join-button"
@@ -868,102 +647,39 @@ ${
                 handleJoin
               }
               disabled={
-                !nameInput.trim() ||
-                !roomInput.trim()
+                !nameInput.trim()
               }
             >
-              <Lock size={16} />
-              Join Room
+              <Code2 size={16} />
+
+              Enter CodeSync
             </button>
-
-            <div className="divider">
-              <span>
-                OR
-              </span>
-            </div>
-
-            <button
-              className="create-room-button"
-              onClick={
-                handleCreateRoom
-              }
-              disabled={
-                creating
-              }
-            >
-              {creating
-                ? "Creating room..."
-                : "Create Room"}
-            </button>
-
-            {createdSecret && (
-              <div className="created-room">
-
-                <strong>
-                  Room created
-                </strong>
-
-                <span>
-                  Copy the room secret.
-                </span>
-
-                <div className="secret-box">
-
-                  <code>
-                    {
-                      createdSecret
-                    }
-                  </code>
-
-                  <button
-                    onClick={
-                      handleCopySecret
-                    }
-                  >
-                    {copied ? (
-                      <Check
-                        size={15}
-                      />
-                    ) : (
-                      <Copy
-                        size={15}
-                      />
-                    )}
-                  </button>
-
-                </div>
-
-              </div>
-            )}
-
           </div>
 
           <div className="join-note">
-            CodeSync currently supports
-            real execution for Python and
-            JavaScript/Node.js on this machine.
+            Everyone who opens this
+            shared link joins the same
+            CodeSync workspace.
+            <br />
+            No secret key is required.
           </div>
-
         </div>
       </div>
     );
   }
 
-  /* ========================================================
-     MAIN APPLICATION
-  ======================================================== */
+  /*
+   * ======================================================
+   * MAIN APPLICATION
+   * ======================================================
+   */
 
   return (
     <div className="app">
-
-      {/* ==================================================
-          TOP BAR
-      ================================================== */}
+      {/* TOP BAR */}
 
       <header className="topbar">
-
         <div className="brand">
-
           <div className="logo">
             <Code2 size={21} />
           </div>
@@ -974,36 +690,32 @@ ${
             </div>
 
             <div className="subtitle">
-              SECURE COLLABORATIVE IDE
+              REAL-TIME COLLABORATIVE IDE
             </div>
           </div>
-
         </div>
 
         <div className="top-actions">
-
           <div className="connection">
+            {connected ? (
+              <>
+                <Wifi size={15} />
 
-            <span
-              className="status-dot"
-              style={{
-                background:
-                  connected
-                    ? "#34d399"
-                    : "#ef4444",
-              }}
-            />
+                Connected
+              </>
+            ) : (
+              <>
+                <WifiOff size={15} />
 
-            {connected
-              ? "Connected"
-              : "Disconnected"}
-
+                Disconnected
+              </>
+            )}
           </div>
 
           <div className="room">
             Room:
             <strong>
-              {room}
+              CodeSync
             </strong>
           </div>
 
@@ -1032,85 +744,54 @@ ${
               )
             }
           >
-            <Settings size={17} />
+            <Settings
+              size={17}
+            />
           </button>
-
         </div>
-
       </header>
 
-      {/* ==================================================
-          WORKSPACE
-      ================================================== */}
+      {/* WORKSPACE */}
 
       <div className="workspace">
-
-        {/* =================================================
-            LEFT SIDEBAR
-        ================================================= */}
+        {/* LEFT */}
 
         <aside className="sidebar">
-
           <div className="sidebar-title">
             EXPLORER
           </div>
 
           <div className="folder">
             <Folder size={15} />
+
             <span>
               src
             </span>
           </div>
 
           <div className="files">
-
-            {files.map(
-              (file) => (
-                <button
-                  key={
-                    file.name
-                  }
-                  className={`file ${
-                    activeFile ===
-                    file.name
-                      ? "active"
-                      : ""
-                  }`}
-                  onClick={() =>
-                    setActiveFile(
-                      file.name
-                    )
-                  }
-                >
-                  <FileCode2
-                    size={14}
-                  />
-
-                  {file.name}
-                </button>
-              )
-            )}
-
-          </div>
-
-        </aside>
-
-        {/* =================================================
-            EDITOR
-        ================================================= */}
-
-        <main className="editor">
-
-          <div className="editor-header">
-
-            <div className="tab">
-
+            <button
+              className="file active"
+            >
               <FileCode2
                 size={14}
               />
 
-              {activeFile}
+              main.py
+            </button>
+          </div>
+        </aside>
 
+        {/* EDITOR */}
+
+        <main className="editor">
+          <div className="editor-header">
+            <div className="tab">
+              <FileCode2
+                size={14}
+              />
+
+              main.py
             </div>
 
             <button
@@ -1122,71 +803,63 @@ ${
                 running
               }
             >
-
-              <Play
-                size={14}
-              />
+              <Play size={14} />
 
               {running
                 ? "Running..."
                 : "Run"}
-
             </button>
-
           </div>
 
           <div className="monaco-container">
-
             <Editor
               height="100%"
-              language={
-                currentFile?.language ??
-                "plaintext"
-              }
+              language="python"
               theme="vs-dark"
-              value={
-                currentFile?.content ??
-                ""
-              }
+              value={code}
               onChange={
-                updateCode
+                handleCodeChange
               }
               options={{
                 minimap: {
                   enabled:
                     false,
                 },
+
                 fontSize: 14,
+
                 lineNumbers:
                   "on",
+
                 automaticLayout:
                   true,
+
                 padding: {
                   top: 15,
                 },
+
                 scrollBeyondLastLine:
                   false,
+
                 tabSize: 4,
+
                 wordWrap:
                   "on",
+
                 smoothScrolling:
                   true,
+
                 cursorBlinking:
                   "smooth",
               }}
             />
-
           </div>
 
-          {/* =================================================
-              TERMINAL
-          ================================================= */}
+          {/* TERMINAL */}
 
           {terminalOpen && (
             <div className="terminal">
-
               <div className="terminal-header">
-
                 <div>
                   <Terminal
                     size={14}
@@ -1203,33 +876,22 @@ ${
                     )
                   }
                 >
-                  <X
-                    size={14}
-                  />
+                  <X size={14} />
                 </button>
-
               </div>
 
               <pre className="terminal-output">
                 {output}
               </pre>
-
             </div>
           )}
-
         </main>
 
-        {/* =================================================
-            RIGHT PANEL
-        ================================================= */}
+        {/* RIGHT */}
 
         <aside className="right-panel">
-
           <div className="right-header">
-
-            <Users
-              size={16}
-            />
+            <Users size={16} />
 
             <span>
               Collaborators
@@ -1238,25 +900,7 @@ ${
             <span className="user-count">
               {users.length}
             </span>
-
           </div>
-
-          {users.length ===
-            0 && (
-            <div
-              style={{
-                padding:
-                  "20px",
-                color:
-                  "#888",
-                fontSize:
-                  "13px",
-              }}
-            >
-              No collaborators
-              connected.
-            </div>
-          )}
 
           {users.map(
             (user) => (
@@ -1266,7 +910,6 @@ ${
                   user.id
                 }
               >
-
                 <div className="avatar">
                   {user.name
                     .charAt(
@@ -1276,7 +919,6 @@ ${
                 </div>
 
                 <div className="user-info">
-
                   <strong>
                     {user.name}
                   </strong>
@@ -1287,61 +929,43 @@ ${
                       ? "You"
                       : "Collaborator"}
                   </span>
-
                 </div>
 
                 <span className="online" />
-
               </div>
             )
           )}
-
         </aside>
-
       </div>
 
-      {/* ==================================================
-          FOOTER
-      ================================================== */}
+      {/* FOOTER */}
 
       <footer>
-
         <div className="footer-left">
-
           <span className="footer-connected">
-
             ●{" "}
-
             {connected
               ? "Connected"
               : "Offline"}
-
           </span>
 
           <span>
-            Private Room
+            Shared Room
           </span>
-
         </div>
 
         <div className="footer-right">
-
           <span>
-            {currentFile?.language ??
-              "Plain Text"}
+            Python
           </span>
 
           <span>
             UTF-8
           </span>
-
         </div>
-
       </footer>
 
-      {/* ==================================================
-          SETTINGS MODAL
-      ================================================== */}
+      {/* SETTINGS */}
 
       {showSettings && (
         <div
@@ -1352,18 +976,13 @@ ${
             )
           }
         >
-
           <div
             className="settings-modal"
-            onClick={(
-              event
-            ) =>
+            onClick={(event) =>
               event.stopPropagation()
             }
           >
-
             <div className="settings-header">
-
               <h2>
                 CodeSync Settings
               </h2>
@@ -1375,15 +994,11 @@ ${
                   )
                 }
               >
-                <X
-                  size={17}
-                />
+                <X size={17} />
               </button>
-
             </div>
 
             <div className="setting-row">
-
               <div>
                 <strong>
                   User
@@ -1393,55 +1008,33 @@ ${
                   {name}
                 </span>
               </div>
-
             </div>
 
             <div className="setting-row">
-
               <div>
                 <strong>
                   Room
                 </strong>
 
                 <span>
-                  {room}
+                  CodeSync
                 </span>
               </div>
-
             </div>
 
             <div className="setting-row">
-
               <div>
                 <strong>
-                  Connection
+                  Collaborators
                 </strong>
 
                 <span>
-                  {connected
-                    ? "WebSocket connected"
-                    : "Disconnected"}
+                  {users.length}
                 </span>
               </div>
-
             </div>
 
             <div className="setting-row">
-
-              <div>
-                <strong>
-                  Execution
-                </strong>
-
-                <span>
-                  Python + Node.js
-                </span>
-              </div>
-
-            </div>
-
-            <div className="setting-row">
-
               <button
                 className="copy-room"
                 onClick={
@@ -1452,16 +1045,12 @@ ${
                   size={14}
                 />
 
-                Copy room link
+                Copy CodeSync link
               </button>
-
             </div>
-
           </div>
-
         </div>
       )}
-
     </div>
   );
 }
