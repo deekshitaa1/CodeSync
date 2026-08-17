@@ -24,10 +24,11 @@ app.get("/", (_req, res) => {
         name: "CodeSync",
         status: "running",
         websocket: "/collaboration",
-        room: "one-global-room",
+        rooms: "enabled",
         execution: "real-python",
         collaboration: "real-time",
         cursors: "enabled",
+        selections: "enabled",
     });
 });
 /* ======================================================
@@ -42,51 +43,62 @@ const wss = new WebSocketServer({
     path: "/collaboration",
 });
 /* ======================================================
-   ONE GLOBAL ROOM
+   INITIAL CODE
    ====================================================== */
-/*
- * CodeSync currently uses ONE shared room.
- *
- * Anyone who connects joins the same collaborative
- * document.
- *
- * The roomId sent by the frontend is currently only
- * used by the frontend/share URL.
- */
-/* ======================================================
-   CLIENTS
-   ====================================================== */
-const clients = new Map();
-/* ======================================================
-   SHARED CODE
-   ====================================================== */
-let sharedCode = `def hello():
+const INITIAL_CODE = `def hello():
     print("Hello from CodeSync!")
 
 hello()
 `;
 /* ======================================================
+   ROOMS
+   ====================================================== */
+const rooms = new Map();
+/* ======================================================
+   GET OR CREATE ROOM
+   ====================================================== */
+function getOrCreateRoom(roomId) {
+    let room = rooms.get(roomId);
+    if (!room) {
+        room = {
+            id: roomId,
+            code: INITIAL_CODE,
+            clients: new Map(),
+        };
+        rooms.set(roomId, room);
+        console.log(`Created CodeSync room: ${roomId}`);
+    }
+    return room;
+}
+/* ======================================================
+   GET ROOM
+   ====================================================== */
+function getRoom(roomId) {
+    return rooms.get(roomId);
+}
+/* ======================================================
    SEND MESSAGE
    ====================================================== */
 function send(socket, data) {
-    if (socket.readyState === WebSocket.OPEN) {
+    if (socket.readyState ===
+        WebSocket.OPEN) {
         socket.send(JSON.stringify(data));
     }
 }
 /* ======================================================
-   GET USERS
+   GET USERS IN ROOM
    ====================================================== */
-function getUsers() {
-    return Array.from(clients.values()).map((client) => ({
+function getUsers(room) {
+    return Array.from(room.clients.values()).map((client) => ({
         id: client.id,
         name: client.name,
     }));
 }
 /* ======================================================
-   BROADCAST
+   BROADCAST TO ROOM
    ====================================================== */
-function broadcast(data, exceptId) {
-    for (const client of clients.values()) {
+function broadcastToRoom(room, data, exceptId) {
+    for (const client of room.clients.values()) {
         if (client.id === exceptId) {
             continue;
         }
@@ -94,21 +106,25 @@ function broadcast(data, exceptId) {
     }
 }
 /* ======================================================
-   BROADCAST TO EVERYONE
+   BROADCAST TO EVERYONE IN ROOM
    ====================================================== */
-function broadcastToEveryone(data) {
-    for (const client of clients.values()) {
+function broadcastToEveryoneInRoom(room, data) {
+    for (const client of room.clients.values()) {
         send(client.socket, data);
     }
 }
 /* ======================================================
-   SEND CURRENT COLLABORATOR CURSORS
+   SEND EXISTING CURSORS TO NEW USER
    ====================================================== */
-function sendExistingCursors(socket, exceptId) {
-    for (const client of clients.values()) {
+function sendExistingCursors(room, socket, exceptId) {
+    for (const client of room.clients.values()) {
         if (client.id === exceptId) {
             continue;
         }
+        /*
+         * User has not positioned their
+         * cursor yet.
+         */
         if (!client.cursor) {
             continue;
         }
@@ -117,9 +133,89 @@ function sendExistingCursors(socket, exceptId) {
             senderId: client.id,
             name: client.name,
             position: client.cursor,
-            selection: client.selection ?? null,
+            selection: client.selection ??
+                null,
         });
     }
+}
+/* ======================================================
+   REMOVE EMPTY ROOM
+   ====================================================== */
+function cleanupRoom(room) {
+    if (room.clients.size === 0) {
+        rooms.delete(room.id);
+        console.log(`Deleted empty CodeSync room: ${room.id}`);
+    }
+}
+/* ======================================================
+   VALIDATE ROOM ID
+   ====================================================== */
+function normalizeRoomId(value) {
+    return String(value ?? "").trim();
+}
+/* ======================================================
+   VALIDATE NAME
+   ====================================================== */
+function normalizeName(value) {
+    return String(value ?? "").trim();
+}
+/* ======================================================
+   VALIDATE CURSOR
+   ====================================================== */
+function parseCursorPosition(value) {
+    if (!value ||
+        typeof value !==
+            "object") {
+        return null;
+    }
+    const position = value;
+    const lineNumber = Number(position.lineNumber);
+    const column = Number(position.column);
+    if (!Number.isInteger(lineNumber) ||
+        !Number.isInteger(column)) {
+        return null;
+    }
+    if (lineNumber < 1 ||
+        column < 1) {
+        return null;
+    }
+    return {
+        lineNumber,
+        column,
+    };
+}
+/* ======================================================
+   VALIDATE SELECTION
+   ====================================================== */
+function parseSelection(value) {
+    if (!value ||
+        typeof value !==
+            "object") {
+        return null;
+    }
+    const selection = value;
+    const startLineNumber = Number(selection.startLineNumber);
+    const startColumn = Number(selection.startColumn);
+    const endLineNumber = Number(selection.endLineNumber);
+    const endColumn = Number(selection.endColumn);
+    if (!Number.isInteger(startLineNumber) ||
+        !Number.isInteger(startColumn) ||
+        !Number.isInteger(endLineNumber) ||
+        !Number.isInteger(endColumn)) {
+        return null;
+    }
+    if (startLineNumber < 1 ||
+        startColumn < 1 ||
+        endLineNumber < 1 ||
+        endColumn < 1) {
+        return null;
+    }
+    return {
+        startLineNumber,
+        startColumn,
+        endLineNumber,
+        endColumn,
+    };
 }
 /* ======================================================
    WEBSOCKET CONNECTION
@@ -127,9 +223,9 @@ function sendExistingCursors(socket, exceptId) {
 wss.on("connection", (socket) => {
     const clientId = crypto.randomUUID();
     console.log(`WebSocket connected: ${clientId}`);
-    /* ==================================================
-       SEND CLIENT ID
-       ================================================== */
+    /*
+     * Send unique client ID immediately.
+     */
     send(socket, {
         type: "connected",
         clientId,
@@ -143,8 +239,13 @@ wss.on("connection", (socket) => {
             /* ==============================================
                JOIN
                ============================================== */
-            if (message.type === "join") {
-                const name = String(message.name ?? "").trim();
+            if (message.type ===
+                "join") {
+                const name = normalizeName(message.name);
+                const roomId = normalizeRoomId(message.roomId);
+                /*
+                 * Validate name.
+                 */
                 if (!name) {
                     send(socket, {
                         type: "error",
@@ -153,48 +254,78 @@ wss.on("connection", (socket) => {
                     return;
                 }
                 /*
-                 * Prevent duplicate registration
-                 * for the same WebSocket.
+                 * Validate room.
                  */
-                if (clients.has(clientId)) {
+                if (!roomId) {
+                    send(socket, {
+                        type: "error",
+                        message: "Room ID is required.",
+                    });
                     return;
                 }
+                /*
+                 * Prevent duplicate registration.
+                 */
+                if (roomsHasClient(clientId)) {
+                    return;
+                }
+                /*
+                 * Get/create requested room.
+                 */
+                const room = getOrCreateRoom(roomId);
+                /*
+                 * Create client.
+                 */
                 const client = {
                     id: clientId,
                     name,
                     socket,
+                    roomId,
+                    cursor: undefined,
+                    selection: undefined,
                 };
-                clients.set(clientId, client);
-                console.log(`${name} joined CodeSync`);
+                /*
+                 * Add client to room.
+                 */
+                room.clients.set(clientId, client);
+                console.log(`${name} joined room ${roomId}`);
                 /* ==========================================
-                   SEND CURRENT SHARED STATE
+                   SEND CURRENT ROOM STATE
                    ========================================== */
                 send(socket, {
                     type: "state",
-                    code: sharedCode,
-                    users: getUsers(),
+                    code: room.code,
+                    users: getUsers(room),
                 });
                 /* ==========================================
-                   SEND EXISTING REMOTE CURSORS
+                   SEND EXISTING CURSORS
                    ========================================== */
-                sendExistingCursors(socket, clientId);
+                sendExistingCursors(room, socket, clientId);
                 /* ==========================================
                    UPDATE USER LIST
                    ========================================== */
-                broadcastToEveryone({
+                broadcastToEveryoneInRoom(room, {
                     type: "users",
-                    users: getUsers(),
+                    users: getUsers(room),
                 });
                 return;
             }
             /* ==============================================
                FIND CLIENT
                ============================================== */
-            const client = clients.get(clientId);
+            const client = findClient(clientId);
             if (!client) {
                 send(socket, {
                     type: "error",
                     message: "You must join CodeSync first.",
+                });
+                return;
+            }
+            const room = getRoom(client.roomId);
+            if (!room) {
+                send(socket, {
+                    type: "error",
+                    message: "CodeSync room no longer exists.",
                 });
                 return;
             }
@@ -208,18 +339,20 @@ wss.on("connection", (socket) => {
                     return;
                 }
                 /*
-                 * Update shared source of truth.
+                 * Update room's source
+                 * of truth.
                  */
-                sharedCode =
+                room.code =
                     message.code;
-                console.log(`${client.name} edited shared code`);
+                console.log(`${client.name} edited room ${room.id}`);
                 /*
-                 * Send complete code to
-                 * every other collaborator.
+                 * Send latest complete code
+                 * to every other collaborator
+                 * in the SAME room.
                  */
-                broadcast({
+                broadcastToRoom(room, {
                     type: "code-change",
-                    code: sharedCode,
+                    code: room.code,
                     senderId: clientId,
                 }, clientId);
                 return;
@@ -229,63 +362,39 @@ wss.on("connection", (socket) => {
                ============================================== */
             if (message.type ===
                 "cursor-change") {
-                const lineNumber = Number(message.position
-                    ?.lineNumber);
-                const column = Number(message.position
-                    ?.column);
+                const position = parseCursorPosition(message.position);
                 /*
-                 * Validate Monaco position.
+                 * Invalid cursor.
                  */
-                if (!Number.isInteger(lineNumber) ||
-                    !Number.isInteger(column) ||
-                    lineNumber < 1 ||
-                    column < 1) {
+                if (!position) {
                     return;
                 }
-                client.cursor = {
-                    lineNumber,
-                    column,
-                };
-                /* ==========================================
-                   SELECTION
-                   ========================================== */
-                let selection;
-                if (message.selection &&
-                    Number.isInteger(message.selection
-                        .startLineNumber) &&
-                    Number.isInteger(message.selection
-                        .startColumn) &&
-                    Number.isInteger(message.selection
-                        .endLineNumber) &&
-                    Number.isInteger(message.selection
-                        .endColumn)) {
-                    selection = {
-                        startLineNumber: message.selection
-                            .startLineNumber,
-                        startColumn: message.selection
-                            .startColumn,
-                        endLineNumber: message.selection
-                            .endLineNumber,
-                        endColumn: message.selection
-                            .endColumn,
-                    };
-                    client.selection =
-                        selection;
-                }
-                else {
-                    client.selection =
-                        undefined;
-                }
                 /*
-                 * Broadcast cursor to every
-                 * other collaborator.
+                 * Save cursor.
                  */
-                broadcast({
+                client.cursor =
+                    position;
+                /*
+                 * Parse selection.
+                 *
+                 * A null/invalid selection means
+                 * there is no active selection.
+                 */
+                const selection = parseSelection(message.selection);
+                client.selection =
+                    selection ??
+                        undefined;
+                /*
+                 * Broadcast cursor + selection
+                 * to everyone else in this room.
+                 */
+                broadcastToRoom(room, {
                     type: "cursor-change",
                     senderId: clientId,
                     name: client.name,
                     position: client.cursor,
-                    selection: selection ?? null,
+                    selection: client.selection ??
+                        null,
                 }, clientId);
                 return;
             }
@@ -294,11 +403,18 @@ wss.on("connection", (socket) => {
                ============================================== */
             if (message.type ===
                 "cursor-clear") {
+                /*
+                 * Remove local cursor state.
+                 */
                 client.cursor =
                     undefined;
                 client.selection =
                     undefined;
-                broadcast({
+                /*
+                 * Tell everyone else in
+                 * this room to remove it.
+                 */
+                broadcastToRoom(room, {
                     type: "cursor-clear",
                     senderId: clientId,
                 }, clientId);
@@ -309,20 +425,35 @@ wss.on("connection", (socket) => {
                ============================================== */
             if (message.type ===
                 "run") {
-                console.log(`${client.name} requested code execution`);
+                console.log(`${client.name} requested execution in room ${room.id}`);
                 /*
-                 * Execute the server's shared code.
+                 * Snapshot the code BEFORE
+                 * execution.
+                 *
+                 * This prevents the result from
+                 * accidentally using a different
+                 * version if another edit arrives.
                  */
-                const result = await executeCode("python", sharedCode);
-                console.log(`Execution finished with exit code ${result.exitCode}`);
-                /*
-                 * Send execution result
-                 * to EVERYONE.
-                 */
-                broadcastToEveryone({
-                    type: "run-result",
-                    result,
-                });
+                const codeToRun = room.code;
+                try {
+                    const result = await executeCode("python", codeToRun);
+                    console.log(`Execution finished for room ${room.id} with exit code ${result.exitCode}`);
+                    /*
+                     * Send result ONLY to the
+                     * collaborators in this room.
+                     */
+                    broadcastToEveryoneInRoom(room, {
+                        type: "run-result",
+                        result,
+                    });
+                }
+                catch (error) {
+                    console.error("Code execution error:", error);
+                    broadcastToEveryoneInRoom(room, {
+                        type: "error",
+                        message: "Code execution failed.",
+                    });
+                }
                 return;
             }
             /* ==============================================
@@ -330,7 +461,7 @@ wss.on("connection", (socket) => {
                ============================================== */
             send(socket, {
                 type: "error",
-                message: `Unknown message type: ${message.type}`,
+                message: `Unknown message type: ${String(message.type)}`,
             });
         }
         catch (error) {
@@ -345,45 +476,81 @@ wss.on("connection", (socket) => {
        DISCONNECT
        ================================================== */
     socket.on("close", () => {
-        const client = clients.get(clientId);
-        if (client) {
-            console.log(`${client.name} disconnected`);
-            /*
-             * Tell remaining collaborators
-             * to remove this user's cursor.
-             */
-            broadcast({
-                type: "cursor-clear",
-                senderId: clientId,
-            }, clientId);
+        const client = findClient(clientId);
+        /*
+         * Client may never have joined.
+         */
+        if (!client) {
+            return;
         }
-        clients.delete(clientId);
-        /* ==============================================
-           UPDATE USERS
-           ============================================== */
-        broadcastToEveryone({
+        const room = getRoom(client.roomId);
+        if (!room) {
+            return;
+        }
+        console.log(`${client.name} disconnected from room ${room.id}`);
+        /*
+         * Tell remaining users to
+         * remove this user's cursor.
+         */
+        broadcastToRoom(room, {
+            type: "cursor-clear",
+            senderId: clientId,
+        }, clientId);
+        /*
+         * Remove client.
+         */
+        room.clients.delete(clientId);
+        /*
+         * Update remaining users.
+         */
+        broadcastToEveryoneInRoom(room, {
             type: "users",
-            users: getUsers(),
+            users: getUsers(room),
         });
+        /*
+         * Delete empty room.
+         */
+        cleanupRoom(room);
     });
     /* ==================================================
        SOCKET ERROR
        ================================================== */
     socket.on("error", (error) => {
-        console.error("WebSocket error:", error);
+        console.error(`WebSocket error for ${clientId}:`, error);
     });
 });
+/* ======================================================
+   FIND CLIENT
+   ====================================================== */
+function findClient(clientId) {
+    for (const room of rooms.values()) {
+        const client = room.clients.get(clientId);
+        if (client) {
+            return client;
+        }
+    }
+    return undefined;
+}
+/* ======================================================
+   CHECK WHETHER CLIENT EXISTS
+   ====================================================== */
+function roomsHasClient(clientId) {
+    return (findClient(clientId) !==
+        undefined);
+}
 /* ======================================================
    START SERVER
    ====================================================== */
 server.listen(PORT, "0.0.0.0", () => {
     console.log("======================================");
-    console.log("       CodeSync Server");
+    console.log("          CodeSync Server");
     console.log("======================================");
     console.log(`HTTP:      http://0.0.0.0:${PORT}`);
     console.log(`WebSocket: ws://0.0.0.0:${PORT}/collaboration`);
-    console.log("Room:      ONE SHARED ROOM");
-    console.log("Execution: REAL PYTHON");
+    console.log("Rooms:     ENABLED");
+    console.log("Code:      REAL-TIME");
     console.log("Cursors:   REAL-TIME");
+    console.log("Selection: REAL-TIME");
+    console.log("Execution: REAL PYTHON");
     console.log("======================================");
 });

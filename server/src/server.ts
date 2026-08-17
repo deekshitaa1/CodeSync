@@ -24,6 +24,7 @@ const app = express();
 app.use(
   cors({
     origin: true,
+    credentials: false,
   })
 );
 
@@ -34,7 +35,7 @@ app.use(express.json());
    ====================================================== */
 
 app.get("/", (_req, res) => {
-  res.json({
+  res.status(200).json({
     name: "CodeSync",
     status: "running",
     websocket: "/collaboration",
@@ -86,24 +87,10 @@ type Client = {
   name: string;
   socket: WebSocket;
 
-  cursor?: CursorPosition;
+  cursor: CursorPosition | null;
 
-  selection?: SelectionPosition;
+  selection: SelectionPosition | null;
 };
-
-/* ======================================================
-   ONE GLOBAL ROOM
-   ====================================================== */
-
-/*
- * CodeSync currently uses ONE shared room.
- *
- * Anyone who connects joins the same collaborative
- * document.
- *
- * The roomId sent by the frontend is currently only
- * used by the frontend/share URL.
- */
 
 /* ======================================================
    CLIENTS
@@ -122,7 +109,7 @@ hello()
 `;
 
 /* ======================================================
-   SEND MESSAGE
+   SAFE SEND
    ====================================================== */
 
 function send(
@@ -135,7 +122,7 @@ function send(
 }
 
 /* ======================================================
-   GET USERS
+   USERS
    ====================================================== */
 
 function getUsers(): User[] {
@@ -177,7 +164,73 @@ function broadcastToEveryone(
 }
 
 /* ======================================================
-   SEND CURRENT COLLABORATOR CURSORS
+   VALIDATE CURSOR POSITION
+   ====================================================== */
+
+function isValidCursorPosition(
+  position: unknown
+): position is CursorPosition {
+  if (
+    !position ||
+    typeof position !== "object"
+  ) {
+    return false;
+  }
+
+  const value =
+    position as Record<string, unknown>;
+
+  return (
+    Number.isInteger(
+      value.lineNumber
+    ) &&
+    Number.isInteger(
+      value.column
+    ) &&
+    Number(value.lineNumber) >= 1 &&
+    Number(value.column) >= 1
+  );
+}
+
+/* ======================================================
+   VALIDATE SELECTION
+   ====================================================== */
+
+function isValidSelection(
+  selection: unknown
+): selection is SelectionPosition {
+  if (
+    !selection ||
+    typeof selection !== "object"
+  ) {
+    return false;
+  }
+
+  const value =
+    selection as Record<string, unknown>;
+
+  return (
+    Number.isInteger(
+      value.startLineNumber
+    ) &&
+    Number.isInteger(
+      value.startColumn
+    ) &&
+    Number.isInteger(
+      value.endLineNumber
+    ) &&
+    Number.isInteger(
+      value.endColumn
+    ) &&
+    Number(value.startLineNumber) >= 1 &&
+    Number(value.startColumn) >= 1 &&
+    Number(value.endLineNumber) >= 1 &&
+    Number(value.endColumn) >= 1
+  );
+}
+
+/* ======================================================
+   SEND EXISTING CURSORS
    ====================================================== */
 
 function sendExistingCursors(
@@ -198,7 +251,7 @@ function sendExistingCursors(
       senderId: client.id,
       name: client.name,
       position: client.cursor,
-      selection: client.selection ?? null,
+      selection: client.selection,
     });
   }
 }
@@ -239,6 +292,19 @@ wss.on(
               raw.toString()
             );
 
+          if (
+            !message ||
+            typeof message !== "object"
+          ) {
+            send(socket, {
+              type: "error",
+              message:
+                "Invalid message format.",
+            });
+
+            return;
+          }
+
           /* ==============================================
              JOIN
              ============================================== */
@@ -261,11 +327,6 @@ wss.on(
               return;
             }
 
-            /*
-             * Prevent duplicate registration
-             * for the same WebSocket.
-             */
-
             if (
               clients.has(clientId)
             ) {
@@ -276,6 +337,8 @@ wss.on(
               id: clientId,
               name,
               socket,
+              cursor: null,
+              selection: null,
             };
 
             clients.set(
@@ -288,7 +351,7 @@ wss.on(
             );
 
             /* ==========================================
-               SEND CURRENT SHARED STATE
+               SEND SHARED STATE
                ========================================== */
 
             send(socket, {
@@ -298,7 +361,7 @@ wss.on(
             });
 
             /* ==========================================
-               SEND EXISTING REMOTE CURSORS
+               SEND EXISTING CURSORS
                ========================================== */
 
             sendExistingCursors(
@@ -307,7 +370,7 @@ wss.on(
             );
 
             /* ==========================================
-               UPDATE USER LIST
+               UPDATE USERS
                ========================================== */
 
             broadcastToEveryone({
@@ -319,7 +382,7 @@ wss.on(
           }
 
           /* ==============================================
-             FIND CLIENT
+             REQUIRE JOIN
              ============================================== */
 
           const client =
@@ -350,10 +413,6 @@ wss.on(
               return;
             }
 
-            /*
-             * Update shared source of truth.
-             */
-
             sharedCode =
               message.code;
 
@@ -361,21 +420,11 @@ wss.on(
               `${client.name} edited shared code`
             );
 
-            /*
-             * Send complete code to
-             * every other collaborator.
-             */
-
             broadcast(
               {
-                type:
-                  "code-change",
-
-                code:
-                  sharedCode,
-
-                senderId:
-                  clientId,
+                type: "code-change",
+                code: sharedCode,
+                senderId: clientId,
               },
               clientId
             );
@@ -391,39 +440,30 @@ wss.on(
             message.type ===
             "cursor-change"
           ) {
-            const lineNumber =
-              Number(
-                message.position
-                  ?.lineNumber
-              );
-
-            const column =
-              Number(
-                message.position
-                  ?.column
-              );
-
-            /*
-             * Validate Monaco position.
-             */
-
             if (
-              !Number.isInteger(
-                lineNumber
-              ) ||
-              !Number.isInteger(
-                column
-              ) ||
-              lineNumber < 1 ||
-              column < 1
+              !isValidCursorPosition(
+                message.position
+              )
             ) {
               return;
             }
 
-            client.cursor = {
-              lineNumber,
-              column,
+            const cursor: CursorPosition = {
+              lineNumber:
+                Number(
+                  message.position
+                    .lineNumber
+                ),
+
+              column:
+                Number(
+                  message.position
+                    .column
+                ),
             };
+
+            client.cursor =
+              cursor;
 
             /* ==========================================
                SELECTION
@@ -431,64 +471,53 @@ wss.on(
 
             let selection:
               | SelectionPosition
-              | undefined;
+              | null = null;
 
             if (
-              message.selection &&
-              Number.isInteger(
+              isValidSelection(
                 message.selection
-                  .startLineNumber
-              ) &&
-              Number.isInteger(
-                message.selection
-                  .startColumn
-              ) &&
-              Number.isInteger(
-                message.selection
-                  .endLineNumber
-              ) &&
-              Number.isInteger(
-                message.selection
-                  .endColumn
               )
             ) {
               selection = {
                 startLineNumber:
-                  message.selection
-                    .startLineNumber,
+                  Number(
+                    message.selection
+                      .startLineNumber
+                  ),
 
                 startColumn:
-                  message.selection
-                    .startColumn,
+                  Number(
+                    message.selection
+                      .startColumn
+                  ),
 
                 endLineNumber:
-                  message.selection
-                    .endLineNumber,
+                  Number(
+                    message.selection
+                      .endLineNumber
+                  ),
 
                 endColumn:
-                  message.selection
-                    .endColumn,
+                  Number(
+                    message.selection
+                      .endColumn
+                  ),
               };
-
-              client.selection =
-                selection;
-            } else {
-              client.selection =
-                undefined;
             }
 
-            /*
-             * Broadcast cursor to every
-             * other collaborator.
-             */
+            client.selection =
+              selection;
+
+            /* ==========================================
+               SEND TO OTHER USERS
+               ========================================== */
 
             broadcast(
               {
-                type:
-                  "cursor-change",
+                type: "cursor-change",
 
                 senderId:
-                  clientId,
+                  client.id,
 
                 name:
                   client.name,
@@ -497,9 +526,9 @@ wss.on(
                   client.cursor,
 
                 selection:
-                  selection ?? null,
+                  client.selection,
               },
-              clientId
+              client.id
             );
 
             return;
@@ -514,10 +543,10 @@ wss.on(
             "cursor-clear"
           ) {
             client.cursor =
-              undefined;
+              null;
 
             client.selection =
-              undefined;
+              null;
 
             broadcast(
               {
@@ -525,9 +554,9 @@ wss.on(
                   "cursor-clear",
 
                 senderId:
-                  clientId,
+                  client.id,
               },
-              clientId
+              client.id
             );
 
             return;
@@ -545,31 +574,35 @@ wss.on(
               `${client.name} requested code execution`
             );
 
-            /*
-             * Execute the server's shared code.
-             */
+            try {
+              const result =
+                await executeCode(
+                  "python",
+                  sharedCode
+                );
 
-            const result =
-              await executeCode(
-                "python",
-                sharedCode
+              console.log(
+                `Execution finished with exit code ${result.exitCode}`
               );
 
-            console.log(
-              `Execution finished with exit code ${result.exitCode}`
-            );
+              broadcastToEveryone({
+                type:
+                  "run-result",
 
-            /*
-             * Send execution result
-             * to EVERYONE.
-             */
+                result,
+              });
+            } catch (error) {
+              console.error(
+                "Code execution error:",
+                error
+              );
 
-            broadcastToEveryone({
-              type:
-                "run-result",
-
-              result,
-            });
+              send(socket, {
+                type: "error",
+                message:
+                  "Code execution failed.",
+              });
+            }
 
             return;
           }
@@ -581,9 +614,10 @@ wss.on(
           send(socket, {
             type: "error",
             message:
-              `Unknown message type: ${message.type}`,
+              `Unknown message type: ${String(
+                message.type
+              )}`,
           });
-
         } catch (error) {
           console.error(
             "WebSocket message error:",
@@ -614,11 +648,6 @@ wss.on(
             `${client.name} disconnected`
           );
 
-          /*
-           * Tell remaining collaborators
-           * to remove this user's cursor.
-           */
-
           broadcast(
             {
               type:
@@ -635,10 +664,6 @@ wss.on(
           clientId
         );
 
-        /* ==============================================
-           UPDATE USERS
-           ============================================== */
-
         broadcastToEveryone({
           type: "users",
           users: getUsers(),
@@ -654,7 +679,7 @@ wss.on(
       "error",
       (error) => {
         console.error(
-          "WebSocket error:",
+          `WebSocket error for ${clientId}:`,
           error
         );
       }
@@ -675,7 +700,7 @@ server.listen(
     );
 
     console.log(
-      "       CodeSync Server"
+      "          CodeSync Server"
     );
 
     console.log(

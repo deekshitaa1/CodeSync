@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import Editor, {
-  OnMount,
-  OnChange,
-} from "@monaco-editor/react";
+
+import Editor from "@monaco-editor/react";
+import type { OnChange, OnMount } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
 
 import {
@@ -66,22 +65,20 @@ type ServerMessage = {
     | "error";
 
   clientId?: string;
-
   code?: string;
-
   users?: User[];
-
   senderId?: string;
-
   name?: string;
-
   position?: CursorPosition;
-
   selection?: SelectionPosition | null;
-
   result?: RunResult;
-
   message?: string;
+};
+
+type RemoteCursor = {
+  name: string;
+  position: CursorPosition;
+  selection: SelectionPosition | null;
 };
 
 /* ======================================================
@@ -119,10 +116,8 @@ function App() {
 
   const [roomId, setRoomId] = useState("");
   const [nameInput, setNameInput] = useState("");
-
   const [name, setName] = useState("");
   const [joinedRoom, setJoinedRoom] = useState("");
-
   const [joining, setJoining] = useState(false);
 
   /* ====================================================
@@ -156,9 +151,10 @@ function App() {
   const [running, setRunning] =
     useState(false);
 
-  const [output, setOutput] = useState(
-    "CodeSync terminal ready.\n\nClick Run to execute main.py."
-  );
+  const [output, setOutput] =
+    useState(
+      "CodeSync terminal ready.\n\nClick Run to execute main.py."
+    );
 
   /* ====================================================
      UI
@@ -187,9 +183,9 @@ function App() {
      ==================================================== */
 
   const editorRef =
-    useRef<Monaco.editor.IStandaloneCodeEditor | null>(
-      null
-    );
+    useRef<
+      Monaco.editor.IStandaloneCodeEditor | null
+    >(null);
 
   const monacoRef =
     useRef<typeof Monaco | null>(null);
@@ -212,27 +208,20 @@ function App() {
     useRef(false);
 
   /* ====================================================
-     CURSOR DECORATIONS
-     ==================================================== */
-
-  const cursorDecorationsRef =
-    useRef<string[]>([]);
-
-  /* ====================================================
      REMOTE CURSORS
      ==================================================== */
 
   const remoteCursorsRef =
-    useRef<
-      Map<
-        string,
-        {
-          name: string;
-          position: CursorPosition;
-          selection?: SelectionPosition | null;
-        }
-      >
-    >(new Map());
+    useRef<Map<string, RemoteCursor>>(
+      new Map()
+    );
+
+  /* ====================================================
+     MONACO DECORATIONS
+     ==================================================== */
+
+  const cursorDecorationsRef =
+    useRef<string[]>([]);
 
   /* ====================================================
      THEME
@@ -269,7 +258,8 @@ function App() {
       roomId.trim();
 
     if (!cleanRoom) {
-      cleanRoom = generateRoomId();
+      cleanRoom =
+        generateRoomId();
 
       setRoomId(cleanRoom);
     }
@@ -281,313 +271,398 @@ function App() {
     setJoining(true);
 
     setJoinedRoom(cleanRoom);
-
     setName(cleanName);
+  };
+
+  /* ====================================================
+     CLAMP MONACO POSITION
+     ==================================================== */
+
+  const clampPosition = (
+    position: CursorPosition,
+    model: Monaco.editor.ITextModel
+  ): CursorPosition => {
+    const maxLine =
+      model.getLineCount();
+
+    const lineNumber =
+      Math.min(
+        Math.max(
+          1,
+          position.lineNumber
+        ),
+        maxLine
+      );
+
+    const maxColumn =
+      model.getLineMaxColumn(
+        lineNumber
+      );
+
+    const column =
+      Math.min(
+        Math.max(
+          1,
+          position.column
+        ),
+        maxColumn
+      );
+
+    return {
+      lineNumber,
+      column,
+    };
+  };
+
+  /* ====================================================
+     CLAMP SELECTION
+     ==================================================== */
+
+  const clampSelection = (
+    selection: SelectionPosition,
+    model: Monaco.editor.ITextModel
+  ): SelectionPosition => {
+    const start =
+      clampPosition(
+        {
+          lineNumber:
+            selection.startLineNumber,
+          column:
+            selection.startColumn,
+        },
+        model
+      );
+
+    const end =
+      clampPosition(
+        {
+          lineNumber:
+            selection.endLineNumber,
+          column:
+            selection.endColumn,
+        },
+        model
+      );
+
+    return {
+      startLineNumber:
+        start.lineNumber,
+
+      startColumn:
+        start.column,
+
+      endLineNumber:
+        end.lineNumber,
+
+      endColumn:
+        end.column,
+    };
   };
 
   /* ====================================================
      UPDATE REMOTE CURSOR DECORATIONS
      ==================================================== */
 
-  const updateRemoteCursorDecorations = () => {
-    const editor =
-      editorRef.current;
+  const updateRemoteCursorDecorations =
+    () => {
+      const editor =
+        editorRef.current;
 
-    const monaco =
-      monacoRef.current;
+      const monaco =
+        monacoRef.current;
 
-    if (!editor || !monaco) {
-      return;
-    }
-
-    const decorations: Monaco.editor.IModelDeltaDecoration[] =
-      [];
-
-    for (const [
-      clientId,
-      cursor,
-    ] of remoteCursorsRef.current) {
-      if (
-        clientId ===
-        clientIdRef.current
-      ) {
-        continue;
+      if (!editor || !monaco) {
+        return;
       }
 
-      const position =
-        cursor.position;
+      const model =
+        editor.getModel();
 
-      /* ==============================================
-         CURSOR
-         ============================================== */
+      if (!model) {
+        return;
+      }
 
-      decorations.push({
-        range:
-          new monaco.Range(
-            position.lineNumber,
-            position.column,
-            position.lineNumber,
-            position.column
-          ),
+      const decorations: Monaco.editor.IModelDeltaDecoration[] =
+        [];
 
-        options: {
-          className:
-            "codesync-remote-cursor",
-
-          hoverMessage: {
-            value:
-              `**${cursor.name}** is here`,
-          },
-
-          stickiness:
-            monaco.editor.TrackedRangeStickiness
-              .NeverGrowsWhenTypingAtEdges,
-        },
-      });
-
-      /* ==============================================
-         SELECTION
-         ============================================== */
-
-      if (
-        cursor.selection &&
-        (
-          cursor.selection.startLineNumber !==
-            cursor.selection.endLineNumber ||
-          cursor.selection.startColumn !==
-            cursor.selection.endColumn
-        )
+      for (
+        const [
+          remoteClientId,
+          cursor,
+        ] of remoteCursorsRef.current
       ) {
-        const selection =
-          cursor.selection;
+        /* ==============================================
+           NEVER DISPLAY OUR OWN CURSOR
+           ============================================== */
+
+        if (
+          remoteClientId ===
+          clientIdRef.current
+        ) {
+          continue;
+        }
+
+        /* ==============================================
+           SAFE CURSOR POSITION
+           ============================================== */
+
+        const safePosition =
+          clampPosition(
+            cursor.position,
+            model
+          );
+
+        /* ==============================================
+           REMOTE CURSOR
+           ============================================== */
 
         decorations.push({
           range:
             new monaco.Range(
-              selection.startLineNumber,
-              selection.startColumn,
-              selection.endLineNumber,
-              selection.endColumn
+              safePosition.lineNumber,
+              safePosition.column,
+              safePosition.lineNumber,
+              safePosition.column
             ),
 
           options: {
-            className:
-              "codesync-remote-selection",
+            /*
+             * IMPORTANT:
+             * beforeContentClassName renders
+             * a real zero-width visual cursor.
+             */
+            beforeContentClassName:
+              "codesync-remote-cursor",
+
+            hoverMessage: {
+              value:
+                `**${cursor.name}** is here`,
+            },
 
             stickiness:
               monaco.editor
                 .TrackedRangeStickiness
                 .NeverGrowsWhenTypingAtEdges,
+
+            zIndex: 100,
           },
         });
+
+        /* ==============================================
+           REMOTE SELECTION
+           ============================================== */
+
+        if (
+          cursor.selection
+        ) {
+          const selection =
+            clampSelection(
+              cursor.selection,
+              model
+            );
+
+          const hasSelection =
+            selection.startLineNumber !==
+              selection.endLineNumber ||
+            selection.startColumn !==
+              selection.endColumn;
+
+          if (hasSelection) {
+            decorations.push({
+              range:
+                new monaco.Range(
+                  selection.startLineNumber,
+                  selection.startColumn,
+                  selection.endLineNumber,
+                  selection.endColumn
+                ),
+
+              options: {
+                className:
+                  "codesync-remote-selection",
+
+                stickiness:
+                  monaco.editor
+                    .TrackedRangeStickiness
+                    .NeverGrowsWhenTypingAtEdges,
+
+                zIndex: 50,
+              },
+            });
+          }
+        }
       }
+
+      cursorDecorationsRef.current =
+        editor.deltaDecorations(
+          cursorDecorationsRef.current,
+          decorations
+        );
+    };
+
+  /* ====================================================
+     SEND CURSOR
+     ==================================================== */
+
+  const sendCursorPosition = () => {
+    const socket =
+      socketRef.current;
+
+    const editor =
+      editorRef.current;
+
+    if (
+      !socket ||
+      socket.readyState !==
+        WebSocket.OPEN ||
+      !editor
+    ) {
+      return;
     }
 
-    cursorDecorationsRef.current =
-      editor.deltaDecorations(
-        cursorDecorationsRef.current,
-        decorations
-      );
+    const position =
+      editor.getPosition();
+
+    if (!position) {
+      return;
+    }
+
+    const selection =
+      editor.getSelection();
+
+    socket.send(
+      JSON.stringify({
+        type:
+          "cursor-change",
+
+        position: {
+          lineNumber:
+            position.lineNumber,
+
+          column:
+            position.column,
+        },
+
+        selection:
+          selection
+            ? {
+                startLineNumber:
+                  selection.startLineNumber,
+
+                startColumn:
+                  selection.startColumn,
+
+                endLineNumber:
+                  selection.endLineNumber,
+
+                endColumn:
+                  selection.endColumn,
+              }
+            : null,
+      })
+    );
+  };
+
+  /* ====================================================
+     CLEAR OWN CURSOR
+     ==================================================== */
+
+  const clearOwnCursor = () => {
+    const socket =
+      socketRef.current;
+
+    if (
+      !socket ||
+      socket.readyState !==
+        WebSocket.OPEN
+    ) {
+      return;
+    }
+
+    socket.send(
+      JSON.stringify({
+        type:
+          "cursor-clear",
+      })
+    );
   };
 
   /* ====================================================
      EDITOR MOUNT
      ==================================================== */
 
-  const handleEditorMount: OnMount = (
-    editor,
-    monaco
-  ) => {
-    editorRef.current =
-      editor;
+  const handleEditorMount: OnMount =
+    (editor, monaco) => {
+      editorRef.current =
+        editor;
 
-    monacoRef.current =
-      monaco;
+      monacoRef.current =
+        monaco;
 
-    updateRemoteCursorDecorations();
+      /*
+       * Draw remote cursors that may
+       * have arrived before Monaco mounted.
+       */
+      updateRemoteCursorDecorations();
 
-    /* ================================================
-       CURSOR POSITION
-       ================================================ */
+      /* ================================================
+         CURSOR POSITION
+         ================================================ */
 
-    editor.onDidChangeCursorPosition(
-      (event) => {
-        const socket =
-          socketRef.current;
-
-        if (
-          !socket ||
-          socket.readyState !==
-            WebSocket.OPEN
-        ) {
-          return;
+      editor.onDidChangeCursorPosition(
+        () => {
+          sendCursorPosition();
         }
+      );
 
-        const position =
-          event.position;
+      /* ================================================
+         SELECTION
+         ================================================ */
 
-        const selection =
-          editor.getSelection();
-
-        socket.send(
-          JSON.stringify({
-            type:
-              "cursor-change",
-
-            position: {
-              lineNumber:
-                position.lineNumber,
-
-              column:
-                position.column,
-            },
-
-            selection:
-              selection
-                ? {
-                    startLineNumber:
-                      selection.startLineNumber,
-
-                    startColumn:
-                      selection.startColumn,
-
-                    endLineNumber:
-                      selection.endLineNumber,
-
-                    endColumn:
-                      selection.endColumn,
-                  }
-                : null,
-          })
-        );
-      }
-    );
-
-    /* ================================================
-       SELECTION CHANGE
-       ================================================ */
-
-    editor.onDidChangeCursorSelection(
-      (event) => {
-        const socket =
-          socketRef.current;
-
-        if (
-          !socket ||
-          socket.readyState !==
-            WebSocket.OPEN
-        ) {
-          return;
+      editor.onDidChangeCursorSelection(
+        () => {
+          sendCursorPosition();
         }
+      );
 
-        const position =
-          editor.getPosition();
+      /* ================================================
+         FOCUS
+         ================================================ */
 
-        const selection =
-          event.selection;
-
-        if (!position) {
-          return;
+      editor.onDidFocusEditorText(
+        () => {
+          sendCursorPosition();
         }
+      );
 
-        socket.send(
-          JSON.stringify({
-            type:
-              "cursor-change",
+      /* ================================================
+         BLUR
+         ================================================ */
 
-            position: {
-              lineNumber:
-                position.lineNumber,
-
-              column:
-                position.column,
-            },
-
-            selection: {
-              startLineNumber:
-                selection.startLineNumber,
-
-              startColumn:
-                selection.startColumn,
-
-              endLineNumber:
-                selection.endLineNumber,
-
-              endColumn:
-                selection.endColumn,
-            },
-          })
-        );
-      }
-    );
-
-    /* ================================================
-       FOCUS
-       ================================================ */
-
-    editor.onDidFocusEditorText(
-      () => {
-        const position =
-          editor.getPosition();
-
-        if (!position) {
-          return;
+      editor.onDidBlurEditorText(
+        () => {
+          clearOwnCursor();
         }
+      );
 
-        const socket =
-          socketRef.current;
+      /* ================================================
+         CONTENT CHANGE
+         ================================================ */
 
-        if (
-          !socket ||
-          socket.readyState !==
-            WebSocket.OPEN
-        ) {
-          return;
+      editor.onDidChangeModelContent(
+        () => {
+          /*
+           * Re-render remote cursors after
+           * the document changes.
+           */
+          window.requestAnimationFrame(
+            () => {
+              updateRemoteCursorDecorations();
+            }
+          );
         }
-
-        socket.send(
-          JSON.stringify({
-            type:
-              "cursor-change",
-
-            position: {
-              lineNumber:
-                position.lineNumber,
-
-              column:
-                position.column,
-            },
-          })
-        );
-      }
-    );
-
-    /* ================================================
-       BLUR
-       ================================================ */
-
-    editor.onDidBlurEditorText(
-      () => {
-        const socket =
-          socketRef.current;
-
-        if (
-          !socket ||
-          socket.readyState !==
-            WebSocket.OPEN
-        ) {
-          return;
-        }
-
-        socket.send(
-          JSON.stringify({
-            type:
-              "cursor-clear",
-          })
-        );
-      }
-    );
-  };
+      );
+    };
 
   /* ====================================================
      WEBSOCKET CONNECTION
@@ -601,8 +676,16 @@ function App() {
       return;
     }
 
+    /*
+     * Clear previous cursor state
+     * before opening a new connection.
+     */
+    remoteCursorsRef.current.clear();
+
     const socket =
-      new WebSocket(WS_URL);
+      new WebSocket(
+        WS_URL
+      );
 
     socketRef.current =
       socket;
@@ -615,11 +698,19 @@ function App() {
       setConnected(true);
       setJoining(false);
 
+      /*
+       * IMPORTANT:
+       * roomId is sent to the server.
+       */
       socket.send(
         JSON.stringify({
-          type: "join",
+          type:
+            "join",
+
           name,
-          roomId: joinedRoom,
+
+          roomId:
+            joinedRoom,
         })
       );
     };
@@ -633,14 +724,9 @@ function App() {
             event.data
           ) as ServerMessage;
 
-        console.log(
-          "CodeSync message:",
-          message
-        );
-
-        /* ==========================================
+        /* ==============================================
            CONNECTED
-           ========================================== */
+           ============================================== */
 
         if (
           message.type ===
@@ -651,14 +737,21 @@ function App() {
           ) {
             clientIdRef.current =
               message.clientId;
+
+            /*
+             * Now that our own ID is known,
+             * make sure our cursor cannot
+             * accidentally be rendered remotely.
+             */
+            updateRemoteCursorDecorations();
           }
 
           return;
         }
 
-        /* ==========================================
-           STATE
-           ========================================== */
+        /* ==============================================
+           INITIAL STATE
+           ============================================== */
 
         if (
           message.type ===
@@ -683,27 +776,24 @@ function App() {
               () => {
                 remoteUpdateRef.current =
                   false;
+
+                updateRemoteCursorDecorations();
               },
               0
             );
           }
 
-          if (
-            message.users
-          ) {
-            setUsers(
-              message.users
-            );
-          }
-
-          updateRemoteCursorDecorations();
+          setUsers(
+            message.users ??
+              []
+          );
 
           return;
         }
 
-        /* ==========================================
+        /* ==============================================
            CODE CHANGE
-           ========================================== */
+           ============================================== */
 
         if (
           message.type ===
@@ -734,12 +824,16 @@ function App() {
             "Code changed by a collaborator.\n\nTerminal cleared.\nClick Run to execute the latest code."
           );
 
-          setRunning(false);
+          setRunning(
+            false
+          );
 
           window.setTimeout(
             () => {
               remoteUpdateRef.current =
                 false;
+
+              updateRemoteCursorDecorations();
             },
             0
           );
@@ -747,24 +841,25 @@ function App() {
           return;
         }
 
-        /* ==========================================
+        /* ==============================================
            USERS
-           ========================================== */
+           ============================================== */
 
         if (
           message.type ===
           "users"
         ) {
           setUsers(
-            message.users ?? []
+            message.users ??
+              []
           );
 
           return;
         }
 
-        /* ==========================================
+        /* ==============================================
            REMOTE CURSOR
-           ========================================== */
+           ============================================== */
 
         if (
           message.type ===
@@ -773,6 +868,17 @@ function App() {
           if (
             !message.senderId ||
             !message.position
+          ) {
+            return;
+          }
+
+          /*
+           * Never store our own cursor
+           * as a remote cursor.
+           */
+          if (
+            message.senderId ===
+            clientIdRef.current
           ) {
             return;
           }
@@ -788,7 +894,8 @@ function App() {
                 message.position,
 
               selection:
-                message.selection,
+                message.selection ??
+                null,
             }
           );
 
@@ -797,9 +904,9 @@ function App() {
           return;
         }
 
-        /* ==========================================
+        /* ==============================================
            REMOTE CURSOR CLEAR
-           ========================================== */
+           ============================================== */
 
         if (
           message.type ===
@@ -818,9 +925,9 @@ function App() {
           return;
         }
 
-        /* ==========================================
+        /* ==============================================
            RUN RESULT
-           ========================================== */
+           ============================================== */
 
         if (
           message.type ===
@@ -870,14 +977,16 @@ function App() {
             terminalOutput
           );
 
-          setRunning(false);
+          setRunning(
+            false
+          );
 
           return;
         }
 
-        /* ==========================================
-           ERROR
-           ========================================== */
+        /* ==============================================
+           SERVER ERROR
+           ============================================== */
 
         if (
           message.type ===
@@ -894,7 +1003,9 @@ function App() {
             }`
           );
 
-          setRunning(false);
+          setRunning(
+            false
+          );
 
           return;
         }
@@ -932,14 +1043,45 @@ function App() {
     };
 
     return () => {
-      socket.close();
+      /*
+       * Only clear the cursor if this
+       * socket is still the active socket.
+       */
+      if (
+        socketRef.current ===
+        socket
+      ) {
+        if (
+          socket.readyState ===
+          WebSocket.OPEN
+        ) {
+          socket.send(
+            JSON.stringify({
+              type:
+                "cursor-clear",
+            })
+          );
+        }
 
-      socketRef.current =
-        null;
+        socket.close();
+
+        socketRef.current =
+          null;
+      }
 
       remoteCursorsRef.current.clear();
 
-      updateRemoteCursorDecorations();
+      if (
+        editorRef.current
+      ) {
+        editorRef.current.deltaDecorations(
+          cursorDecorationsRef.current,
+          []
+        );
+
+        cursorDecorationsRef.current =
+          [];
+      }
     };
   }, [
     name,
@@ -950,43 +1092,48 @@ function App() {
      CODE CHANGE
      ==================================================== */
 
-  const handleCodeChange: OnChange = (
-    value
-  ) => {
-    const newCode =
-      value ?? "";
+  const handleCodeChange: OnChange =
+    (value) => {
+      const newCode =
+        value ?? "";
 
-    setCode(newCode);
-
-    if (
-      remoteUpdateRef.current
-    ) {
-      return;
-    }
-
-    setOutput(
-      "Code modified.\n\nTerminal cleared.\nClick Run to execute the latest code."
-    );
-
-    const socket =
-      socketRef.current;
-
-    if (
-      socket &&
-      socket.readyState ===
-        WebSocket.OPEN
-    ) {
-      socket.send(
-        JSON.stringify({
-          type:
-            "code-change",
-
-          code:
-            newCode,
-        })
+      setCode(
+        newCode
       );
-    }
-  };
+
+      /*
+       * Do not rebroadcast code that
+       * came from another collaborator.
+       */
+      if (
+        remoteUpdateRef.current
+      ) {
+        return;
+      }
+
+      setOutput(
+        "Code modified.\n\nTerminal cleared.\nClick Run to execute the latest code."
+      );
+
+      const socket =
+        socketRef.current;
+
+      if (
+        socket &&
+        socket.readyState ===
+          WebSocket.OPEN
+      ) {
+        socket.send(
+          JSON.stringify({
+            type:
+              "code-change",
+
+            code:
+              newCode,
+          })
+        );
+      }
+    };
 
   /* ====================================================
      RUN
@@ -1008,9 +1155,13 @@ function App() {
       return;
     }
 
-    setTerminalOpen(true);
+    setTerminalOpen(
+      true
+    );
 
-    setRunning(true);
+    setRunning(
+      true
+    );
 
     setOutput(
       "$ python main.py\n\nRunning..."
@@ -1040,11 +1191,15 @@ function App() {
           url
         );
 
-        setCopied(true);
+        setCopied(
+          true
+        );
 
         window.setTimeout(
           () => {
-            setCopied(false);
+            setCopied(
+              false
+            );
           },
           2000
         );
@@ -1092,7 +1247,9 @@ function App() {
 
               <div className="brand-text">
                 <div className="brand-name">
-                  <span>Code</span>
+                  <span>
+                    Code
+                  </span>
 
                   <span className="brand-green">
                     Sync
@@ -1163,7 +1320,9 @@ function App() {
                   handleGenerateRoom
                 }
               >
-                <Sparkles size={17} />
+                <Sparkles
+                  size={17}
+                />
 
                 <span>
                   Generate Unique Room
@@ -1195,9 +1354,9 @@ function App() {
           : "theme-dark"
       }`}
     >
-      {/* ================================================
+      {/* ==================================================
           TOP BAR
-          ================================================ */}
+          ================================================== */}
 
       <header className="topbar">
         <div className="brand">
@@ -1263,19 +1422,19 @@ function App() {
               )
             }
           >
-            <Settings
-              size={17}
-            />
+            <Settings size={17} />
           </button>
         </div>
       </header>
 
-      {/* ================================================
+      {/* ==================================================
           WORKSPACE
-          ================================================ */}
+          ================================================== */}
 
       <div className="workspace">
-        {/* SIDEBAR */}
+        {/* ==================================================
+            SIDEBAR
+            ================================================== */}
 
         <aside className="sidebar">
           <div className="sidebar-title">
@@ -1292,23 +1451,21 @@ function App() {
 
           <div className="files">
             <button className="file active">
-              <FileCode2
-                size={14}
-              />
+              <FileCode2 size={14} />
 
               main.py
             </button>
           </div>
         </aside>
 
-        {/* EDITOR */}
+        {/* ==================================================
+            EDITOR
+            ================================================== */}
 
         <main className="editor">
           <div className="editor-header">
             <div className="tab">
-              <FileCode2
-                size={14}
-              />
+              <FileCode2 size={14} />
 
               main.py
             </div>
@@ -1335,8 +1492,7 @@ function App() {
               height="100%"
               language="python"
               theme={
-                theme ===
-                "light"
+                theme === "light"
                   ? "vs"
                   : "vs-dark"
               }
@@ -1353,7 +1509,8 @@ function App() {
                     false,
                 },
 
-                fontSize: 14,
+                fontSize:
+                  14,
 
                 lineNumbers:
                   "on",
@@ -1368,7 +1525,8 @@ function App() {
                 scrollBeyondLastLine:
                   false,
 
-                tabSize: 4,
+                tabSize:
+                  4,
 
                 wordWrap:
                   "on",
@@ -1388,7 +1546,9 @@ function App() {
             />
           </div>
 
-          {/* TERMINAL */}
+          {/* ==================================================
+              TERMINAL
+              ================================================== */}
 
           {terminalOpen && (
             <div
@@ -1426,7 +1586,9 @@ function App() {
           )}
         </main>
 
-        {/* RIGHT PANEL */}
+        {/* ==================================================
+            RIGHT COLLABORATORS PANEL
+            ================================================== */}
 
         <aside className="right-panel">
           <div className="right-header">
@@ -1449,7 +1611,9 @@ function App() {
               >
                 <div className="avatar">
                   {user.name
-                    .charAt(0)
+                    .charAt(
+                      0
+                    )
                     .toUpperCase()}
                 </div>
 
@@ -1473,9 +1637,9 @@ function App() {
         </aside>
       </div>
 
-      {/* ================================================
+      {/* ==================================================
           FOOTER
-          ================================================ */}
+          ================================================== */}
 
       <footer>
         <div className="footer-left">
@@ -1487,7 +1651,8 @@ function App() {
           </span>
 
           <span>
-            Room: {joinedRoom}
+            Room:{" "}
+            {joinedRoom}
           </span>
         </div>
 
@@ -1502,9 +1667,9 @@ function App() {
         </div>
       </footer>
 
-      {/* ================================================
-          SETTINGS
-          ================================================ */}
+      {/* ==================================================
+          SETTINGS MODAL
+          ================================================== */}
 
       {showSettings && (
         <div
@@ -1572,8 +1737,6 @@ function App() {
                 </span>
               </div>
             </div>
-
-            {/* THEME */}
 
             <div className="setting-row">
               <div>
