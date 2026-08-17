@@ -4,7 +4,7 @@ import http from "node:http";
 import crypto from "node:crypto";
 import { WebSocketServer, WebSocket, } from "ws";
 import { executeCode, } from "./execution/execute.js";
-const PORT = 4000;
+const PORT = Number(process.env.PORT) || 4000;
 /*
  * ======================================================
  * EXPRESS
@@ -322,16 +322,13 @@ wss.on("connection", (socket) => {
  * START SERVER
  * ======================================================
  */
-server.listen(PORT, () => {
-    console.log("");
+server.listen(PORT, "0.0.0.0", () => {
     console.log("======================================");
-    console.log("          CodeSync Server");
+    console.log("       CodeSync Server");
     console.log("======================================");
-    console.log(`HTTP:      http://localhost:${PORT}`);
-    console.log(`WebSocket: ws://localhost:${PORT}/collaboration`);
-    console.log("Room:      ONE GLOBAL SHARED ROOM");
-    console.log("Auth:      NONE");
+    console.log(`HTTP:      http://0.0.0.0:${PORT}`);
+    console.log(`WebSocket: ws://0.0.0.0:${PORT}/collaboration`);
+    console.log("Room:      ONE SHARED ROOM");
     console.log("Execution: REAL PYTHON");
     console.log("======================================");
-    console.log("");
 });

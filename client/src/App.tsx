@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
-
 import {
   Code2,
   Users,
@@ -14,6 +13,8 @@ import {
   X,
   Wifi,
   WifiOff,
+  Sparkles,
+  Copy,
 } from "lucide-react";
 import "./App.css";
 
@@ -39,188 +40,167 @@ type ServerMessage = {
     | "error";
 
   clientId?: string;
-
   code?: string;
-
   users?: User[];
-
   senderId?: string;
-
   result?: RunResult;
-
   message?: string;
 };
 
-
 const WS_URL =
   "wss://codesync-server-ec9a.onrender.com/collaboration";
+
 const INITIAL_CODE = `def hello():
     print("Hello from CodeSync!")
 
 hello()
 `;
 
-function App() {
-  /*
-   * ======================================================
-   * USER
-   * ======================================================
-   */
+function generateRoomId(): string {
+  const first = crypto.randomUUID().split("-")[0];
+  const second = crypto.randomUUID().split("-")[0];
 
+  return `${first}-${second}`;
+}
+
+function App() {
+  /* ======================================================
+     LOGIN
+     ====================================================== */
+
+  const [roomId, setRoomId] = useState("");
   const [nameInput, setNameInput] = useState("");
 
   const [name, setName] = useState("");
+  const [joinedRoom, setJoinedRoom] = useState("");
 
-  /*
-   * ======================================================
-   * SHARED CODE
-   * ======================================================
-   */
+  const [joining, setJoining] = useState(false);
 
-  const [code, setCode] =
-    useState<string>(INITIAL_CODE);
+  /* ======================================================
+     SHARED CODE
+     ====================================================== */
 
-  /*
-   * ======================================================
-   * COLLABORATORS
-   * ======================================================
-   */
+  const [code, setCode] = useState(INITIAL_CODE);
 
-  const [users, setUsers] =
-    useState<User[]>([]);
+  /* ======================================================
+     USERS
+     ====================================================== */
 
-  /*
-   * ======================================================
-   * CONNECTION
-   * ======================================================
-   */
+  const [users, setUsers] = useState<User[]>([]);
 
-  const [connected, setConnected] =
-    useState(false);
+  /* ======================================================
+     CONNECTION
+     ====================================================== */
 
-  /*
-   * ======================================================
-   * TERMINAL
-   * ======================================================
-   */
+  const [connected, setConnected] = useState(false);
 
-  const [terminalOpen, setTerminalOpen] =
-    useState(true);
+  /* ======================================================
+     TERMINAL
+     ====================================================== */
 
-  const [running, setRunning] =
-    useState(false);
+  const [terminalOpen, setTerminalOpen] = useState(true);
+  const [running, setRunning] = useState(false);
 
-  const [output, setOutput] =
-    useState(
-      "CodeSync terminal ready.\n\nClick Run to execute main.py."
-    );
+  const [output, setOutput] = useState(
+    "CodeSync terminal ready.\n\nClick Run to execute main.py."
+  );
 
-  /*
-   * ======================================================
-   * UI
-   * ======================================================
-   */
+  /* ======================================================
+     UI
+     ====================================================== */
 
-  const [copied, setCopied] =
-    useState(false);
+  const [copied, setCopied] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
-  const [showSettings, setShowSettings] =
-    useState(false);
+  /* ======================================================
+     WEBSOCKET
+     ====================================================== */
 
-  /*
-   * ======================================================
-   * WEBSOCKET
-   * ======================================================
-   */
+  const socketRef = useRef<WebSocket | null>(null);
 
-  const socketRef =
-    useRef<WebSocket | null>(null);
+  const clientIdRef = useRef("");
 
-  const clientIdRef =
-    useRef("");
+  const remoteUpdateRef = useRef(false);
 
-  /*
-   * Prevent a remote code update from
-   * being sent back to the server.
-   */
+  /* ======================================================
+     GENERATE ROOM
+     ====================================================== */
 
-  const remoteUpdateRef =
-    useRef(false);
+  const handleGenerateRoom = () => {
+    setRoomId(generateRoomId());
+  };
 
-  /*
-   * ======================================================
-   * LOGIN
-   * ======================================================
-   */
+  /* ======================================================
+     JOIN
+     ====================================================== */
 
   const handleJoin = () => {
-    const cleanName =
-      nameInput.trim();
+    const cleanName = nameInput.trim();
+    const cleanRoom = roomId.trim();
+
+    if (!cleanRoom) {
+      setRoomId(generateRoomId());
+      return;
+    }
 
     if (!cleanName) {
       return;
     }
 
+    setJoining(true);
+
+    setJoinedRoom(cleanRoom);
     setName(cleanName);
   };
 
-  /*
-   * ======================================================
-   * WEBSOCKET CONNECTION
-   * ======================================================
-   */
+  /* ======================================================
+     WEBSOCKET
+     ====================================================== */
 
   useEffect(() => {
-    if (!name) {
+    if (!name || !joinedRoom) {
       return;
     }
 
-    const socket =
-      new WebSocket(WS_URL);
+    const socket = new WebSocket(WS_URL);
 
-    socketRef.current =
-      socket;
+    socketRef.current = socket;
 
     socket.onopen = () => {
-      console.log(
-        "CodeSync WebSocket connected"
-      );
+      console.log("CodeSync WebSocket connected");
 
       setConnected(true);
+      setJoining(false);
 
+      /*
+       * Current backend identifies users by name.
+       *
+       * roomId is kept in the frontend URL/session UI.
+       * The current backend still uses one global room.
+       */
       socket.send(
         JSON.stringify({
           type: "join",
           name,
+          roomId: joinedRoom,
         })
       );
     };
 
     socket.onmessage = (event) => {
       try {
-        const message =
-          JSON.parse(
-            event.data
-          ) as ServerMessage;
+        const message = JSON.parse(
+          event.data
+        ) as ServerMessage;
 
-        console.log(
-          "CodeSync message:",
-          message
-        );
+        console.log("CodeSync message:", message);
 
-        /*
-         * ==================================================
-         * CLIENT ID
-         * ==================================================
-         */
+        /* ==================================================
+           CONNECTED
+           ================================================== */
 
-        if (
-          message.type ===
-          "connected"
-        ) {
-          if (
-            message.clientId
-          ) {
+        if (message.type === "connected") {
+          if (message.clientId) {
             clientIdRef.current =
               message.clientId;
           }
@@ -228,61 +208,37 @@ function App() {
           return;
         }
 
-        /*
-         * ==================================================
-         * INITIAL ROOM STATE
-         * ==================================================
-         */
+        /* ==================================================
+           INITIAL STATE
+           ================================================== */
 
-        if (
-          message.type ===
-          "state"
-        ) {
-          if (
-            typeof message.code ===
-            "string"
-          ) {
-            remoteUpdateRef.current =
-              true;
+        if (message.type === "state") {
+          if (typeof message.code === "string") {
+            remoteUpdateRef.current = true;
 
-            setCode(
-              message.code
-            );
+            setCode(message.code);
 
             setOutput(
               "CodeSync terminal ready.\n\nShared code loaded."
             );
 
-            window.setTimeout(
-              () => {
-                remoteUpdateRef.current =
-                  false;
-              },
-              0
-            );
+            window.setTimeout(() => {
+              remoteUpdateRef.current = false;
+            }, 0);
           }
 
-          if (
-            message.users
-          ) {
-            setUsers(
-              message.users
-            );
+          if (message.users) {
+            setUsers(message.users);
           }
 
           return;
         }
 
-        /*
-         * ==================================================
-         * CODE CHANGE FROM ANOTHER USER
-         * ==================================================
-         */
+        /* ==================================================
+           REMOTE CODE CHANGE
+           ================================================== */
 
-        if (
-          message.type ===
-          "code-change"
-        ) {
+        if (message.type === "code-change") {
           if (
             message.senderId ===
             clientIdRef.current
@@ -290,25 +246,13 @@ function App() {
             return;
           }
 
-          if (
-            typeof message.code !==
-            "string"
-          ) {
+          if (typeof message.code !== "string") {
             return;
           }
 
-          remoteUpdateRef.current =
-            true;
+          remoteUpdateRef.current = true;
 
-          setCode(
-            message.code
-          );
-
-          /*
-           * IMPORTANT:
-           * Whenever another user edits,
-           * this user's terminal is cleared.
-           */
+          setCode(message.code);
 
           setOutput(
             "Code changed by a collaborator.\n\nTerminal cleared.\nClick Run to execute the latest code."
@@ -316,66 +260,41 @@ function App() {
 
           setRunning(false);
 
-          window.setTimeout(
-            () => {
-              remoteUpdateRef.current =
-                false;
-            },
-            0
-          );
+          window.setTimeout(() => {
+            remoteUpdateRef.current = false;
+          }, 0);
 
           return;
         }
 
-        /*
-         * ==================================================
-         * USERS
-         * ==================================================
-         */
+        /* ==================================================
+           USERS
+           ================================================== */
 
-        if (
-          message.type ===
-          "users"
-        ) {
-          setUsers(
-            message.users ?? []
-          );
-
+        if (message.type === "users") {
+          setUsers(message.users ?? []);
           return;
         }
 
-        /*
-         * ==================================================
-         * RUN RESULT
-         * ==================================================
-         */
+        /* ==================================================
+           RUN RESULT
+           ================================================== */
 
-        if (
-          message.type ===
-          "run-result"
-        ) {
-          if (
-            !message.result
-          ) {
+        if (message.type === "run-result") {
+          if (!message.result) {
             return;
           }
 
-          const result =
-            message.result;
+          const result = message.result;
 
           let terminalOutput =
-            `$ python main.py\n\n`;
+            "$ python main.py\n\n";
 
-          if (
-            result.stdout
-          ) {
-            terminalOutput +=
-              result.stdout;
+          if (result.stdout) {
+            terminalOutput += result.stdout;
           }
 
-          if (
-            result.stderr
-          ) {
+          if (result.stderr) {
             terminalOutput +=
               `\n\n[stderr]\n${result.stderr}`;
           }
@@ -384,8 +303,7 @@ function App() {
             !result.stdout &&
             !result.stderr
           ) {
-            terminalOutput +=
-              "(no output)";
+            terminalOutput += "(no output)";
           }
 
           terminalOutput +=
@@ -393,28 +311,19 @@ function App() {
               result.exitCode ?? 0
             }`;
 
-          setOutput(
-            terminalOutput
-          );
+          setOutput(terminalOutput);
 
           setRunning(false);
 
           return;
         }
 
-        /*
-         * ==================================================
-         * ERROR
-         * ==================================================
-         */
+        /* ==================================================
+           ERROR
+           ================================================== */
 
-        if (
-          message.type ===
-          "error"
-        ) {
-          console.error(
-            message.message
-          );
+        if (message.type === "error") {
+          console.error(message.message);
 
           setOutput(
             `Server error:\n\n${
@@ -441,134 +350,109 @@ function App() {
       );
 
       setConnected(false);
+      setJoining(false);
     };
 
-    socket.onerror = (
-      error
-    ) => {
+    socket.onerror = (error) => {
       console.error(
         "WebSocket error:",
         error
       );
 
       setConnected(false);
+      setJoining(false);
     };
 
     return () => {
       socket.close();
-
-      socketRef.current =
-        null;
+      socketRef.current = null;
     };
-  }, [name]);
+  }, [name, joinedRoom]);
 
-  /*
-   * ======================================================
-   * CODE CHANGE
-   * ======================================================
-   */
+  /* ======================================================
+     CODE CHANGE
+     ====================================================== */
 
   const handleCodeChange = (
-    value:
-      | string
-      | undefined
+    value: string | undefined
   ) => {
-    const newCode =
-      value ?? "";
+    const newCode = value ?? "";
 
-    setCode(
-      newCode
-    );
+    setCode(newCode);
 
-    /*
-     * If this update came from
-     * another collaborator, don't
-     * broadcast it again.
-     */
-
-    if (
-      remoteUpdateRef.current
-    ) {
+    if (remoteUpdateRef.current) {
       return;
     }
-
-    /*
-     * Every local edit clears
-     * the local terminal.
-     */
 
     setOutput(
       "Code modified.\n\nTerminal cleared.\nClick Run to execute the latest code."
     );
 
-    /*
-     * Send the new code to server.
-     */
-
-    const socket =
-      socketRef.current;
+    const socket = socketRef.current;
 
     if (
       socket &&
-      socket.readyState ===
-        WebSocket.OPEN
+      socket.readyState === WebSocket.OPEN
     ) {
       socket.send(
         JSON.stringify({
-          type:
-            "code-change",
-
-          code:
-            newCode,
+          type: "code-change",
+          code: newCode,
         })
       );
     }
   };
 
-  /*
-   * ======================================================
-   * RUN REAL PYTHON CODE
-   * ======================================================
-   */
+  /* ======================================================
+     RUN
+     ====================================================== */
 
-   const handleRun = () => {
-        const socket = socketRef.current;
+  const handleRun = () => {
+    const socket = socketRef.current;
 
-        if (!socket || socket.readyState !== WebSocket.OPEN) {
-            setOutput("Not connected to CodeSync server.");
-            return;
-        }
+    if (
+      !socket ||
+      socket.readyState !== WebSocket.OPEN
+    ) {
+      setOutput(
+        "Not connected to CodeSync server."
+      );
 
-        setRunning(true);
-        setTerminalOpen(true);
-        setOutput("$ python main.py\n\nRunning...");
+      return;
+    }
 
-        socket.send(
-            JSON.stringify({
-                type: "run",
-            })
-        );
-    };
-  /*
-   * ======================================================
-   * SHARE CURRENT URL
-   * ======================================================
-   */
+    setTerminalOpen(true);
+    setRunning(true);
+
+    setOutput(
+      "$ python main.py\n\nRunning..."
+    );
+
+    socket.send(
+      JSON.stringify({
+        type: "run",
+      })
+    );
+  };
+
+  /* ======================================================
+     SHARE
+     ====================================================== */
 
   const handleShare = async () => {
     try {
-      await navigator.clipboard.writeText(
-        window.location.href
-      );
+      const url =
+        `${window.location.origin}/?room=${encodeURIComponent(
+          joinedRoom
+        )}`;
+
+      await navigator.clipboard.writeText(url);
 
       setCopied(true);
 
-      window.setTimeout(
-        () => {
-          setCopied(false);
-        },
-        2000
-      );
+      window.setTimeout(() => {
+        setCopied(false);
+      }, 2000);
     } catch {
       window.prompt(
         "Copy this CodeSync link:",
@@ -577,97 +461,169 @@ function App() {
     }
   };
 
-  /*
-   * ======================================================
-   * LOGIN SCREEN
-   * ======================================================
-   */
+  /* ======================================================
+     LOGIN SCREEN
+     ====================================================== */
 
   if (!name) {
     return (
       <div className="join-screen">
-        <div className="join-card">
-          <div className="join-logo">
-            <Code2 size={30} />
-          </div>
 
-          <h1>
-            CodeSync
-          </h1>
+        {/* TOP STATUS */}
 
-          <p className="join-subtitle">
-            Real-time collaborative
-            coding workspace
-          </p>
+        <div className="joining-status">
+          <span className="status-spinner" />
+          {joining
+            ? "Joining room..."
+            : "Ready to collaborate"}
+        </div>
 
-          <div className="security-badge">
-            <Users size={15} />
-            Shared collaborative room
-          </div>
+        {/* GREEN CORNER */}
 
-          <div className="join-form">
-            <label>
-              Your name
-            </label>
+        <div className="green-corner" />
 
-            <input
-              value={nameInput}
-              onChange={(event) =>
-                setNameInput(
-                  event.target.value
-                )
-              }
-              onKeyDown={(event) => {
-                if (
-                  event.key ===
-                  "Enter"
-                ) {
-                  handleJoin();
-                }
-              }}
-              placeholder="e.g. Deekshita"
-              autoFocus
+        {/* MAIN */}
+
+        <div className="join-layout">
+
+          {/* LEFT */}
+
+          <section className="join-visual">
+
+            <div className="illustration-glow" />
+
+            <img
+              src="/codesync-collaboration.png"
+              alt="Developers collaborating"
+              className="collaboration-image"
             />
 
-            <button
-              className="join-button"
-              onClick={
-                handleJoin
-              }
-              disabled={
-                !nameInput.trim()
-              }
-            >
-              <Code2 size={16} />
+          </section>
 
-              Enter CodeSync
-            </button>
-          </div>
+          {/* RIGHT */}
 
-          <div className="join-note">
-            Everyone who opens this
-            shared link joins the same
-            CodeSync workspace.
-            <br />
-            No secret key is required.
-          </div>
+          <section className="join-content">
+
+            {/* BRAND */}
+
+            <div className="brand-large">
+
+              <div className="brand-icon">
+                <Code2 size={34} />
+              </div>
+
+              <div className="brand-text">
+                <div className="brand-name">
+                  <span>Code</span>
+                  <span className="brand-green">
+                    Sync
+                  </span>
+                </div>
+
+                <div className="brand-tagline">
+                  Code, Chat and Collaborate.
+                  It's All in Sync.
+                </div>
+              </div>
+
+            </div>
+
+            {/* FORM */}
+
+            <div className="join-form">
+
+              <div className="input-wrapper">
+
+                <input
+                  className="room-input"
+                  value={roomId}
+                  onChange={(event) =>
+                    setRoomId(
+                      event.target.value
+                    )
+                  }
+                  placeholder="Room ID"
+                  autoComplete="off"
+                />
+
+              </div>
+
+              <div className="input-wrapper">
+
+                <input
+                  className="name-input"
+                  value={nameInput}
+                  onChange={(event) =>
+                    setNameInput(
+                      event.target.value
+                    )
+                  }
+                  onKeyDown={(event) => {
+                    if (
+                      event.key ===
+                      "Enter"
+                    ) {
+                      handleJoin();
+                    }
+                  }}
+                  placeholder="Your name"
+                  autoComplete="name"
+                />
+
+              </div>
+
+              <button
+                className="join-button"
+                onClick={handleJoin}
+                disabled={
+                  !nameInput.trim()
+                }
+              >
+                <span>Join</span>
+              </button>
+
+              <button
+                className="generate-room"
+                onClick={
+                  handleGenerateRoom
+                }
+              >
+                <Sparkles size={17} />
+
+                <span>
+                  Generate Unique Room
+                  <br />
+                  Id
+                </span>
+              </button>
+
+            </div>
+
+            <div className="join-description">
+              Collaborate on code in
+              real-time with your team.
+            </div>
+
+          </section>
+
         </div>
       </div>
     );
   }
 
-  /*
-   * ======================================================
-   * MAIN APPLICATION
-   * ======================================================
-   */
+  /* ======================================================
+     MAIN IDE
+     ====================================================== */
 
   return (
     <div className="app">
+
       {/* TOP BAR */}
 
       <header className="topbar">
+
         <div className="brand">
+
           <div className="logo">
             <Code2 size={21} />
           </div>
@@ -681,37 +637,37 @@ function App() {
               REAL-TIME COLLABORATIVE IDE
             </div>
           </div>
+
         </div>
 
         <div className="top-actions">
+
           <div className="connection">
+
             {connected ? (
               <>
                 <Wifi size={15} />
-
                 Connected
               </>
             ) : (
               <>
                 <WifiOff size={15} />
-
                 Disconnected
               </>
             )}
+
           </div>
 
           <div className="room">
             Room:
             <strong>
-              CodeSync
+              {joinedRoom}
             </strong>
           </div>
 
           <button
             className="share-button"
-            onClick={
-              handleShare
-            }
+            onClick={handleShare}
           >
             {copied ? (
               <Check size={15} />
@@ -727,69 +683,59 @@ function App() {
           <button
             className="icon-button"
             onClick={() =>
-              setShowSettings(
-                true
-              )
+              setShowSettings(true)
             }
           >
-            <Settings
-              size={17}
-            />
+            <Settings size={17} />
           </button>
+
         </div>
+
       </header>
 
       {/* WORKSPACE */}
 
       <div className="workspace">
-        {/* LEFT */}
+
+        {/* SIDEBAR */}
 
         <aside className="sidebar">
+
           <div className="sidebar-title">
             EXPLORER
           </div>
 
           <div className="folder">
             <Folder size={15} />
-
-            <span>
-              src
-            </span>
+            <span>src</span>
           </div>
 
           <div className="files">
-            <button
-              className="file active"
-            >
-              <FileCode2
-                size={14}
-              />
 
+            <button className="file active">
+              <FileCode2 size={14} />
               main.py
             </button>
+
           </div>
+
         </aside>
 
         {/* EDITOR */}
 
         <main className="editor">
-          <div className="editor-header">
-            <div className="tab">
-              <FileCode2
-                size={14}
-              />
 
+          <div className="editor-header">
+
+            <div className="tab">
+              <FileCode2 size={14} />
               main.py
             </div>
 
             <button
               className="run-button"
-              onClick={
-                handleRun
-              }
-              disabled={
-                running
-              }
+              onClick={handleRun}
+              disabled={running}
             >
               <Play size={14} />
 
@@ -797,9 +743,11 @@ function App() {
                 ? "Running..."
                 : "Run"}
             </button>
+
           </div>
 
           <div className="monaco-container">
+
             <Editor
               height="100%"
               language="python"
@@ -810,49 +758,33 @@ function App() {
               }
               options={{
                 minimap: {
-                  enabled:
-                    false,
+                  enabled: false,
                 },
-
                 fontSize: 14,
-
-                lineNumbers:
-                  "on",
-
-                automaticLayout:
-                  true,
-
+                lineNumbers: "on",
+                automaticLayout: true,
                 padding: {
                   top: 15,
                 },
-
-                scrollBeyondLastLine:
-                  false,
-
+                scrollBeyondLastLine: false,
                 tabSize: 4,
-
-                wordWrap:
-                  "on",
-
-                smoothScrolling:
-                  true,
-
-                cursorBlinking:
-                  "smooth",
+                wordWrap: "on",
+                smoothScrolling: true,
+                cursorBlinking: "smooth",
               }}
             />
+
           </div>
 
           {/* TERMINAL */}
 
           {terminalOpen && (
             <div className="terminal">
-              <div className="terminal-header">
-                <div>
-                  <Terminal
-                    size={14}
-                  />
 
+              <div className="terminal-header">
+
+                <div>
+                  <Terminal size={14} />
                   TERMINAL
                 </div>
 
@@ -866,19 +798,24 @@ function App() {
                 >
                   <X size={14} />
                 </button>
+
               </div>
 
               <pre className="terminal-output">
                 {output}
               </pre>
+
             </div>
           )}
+
         </main>
 
-        {/* RIGHT */}
+        {/* RIGHT PANEL */}
 
         <aside className="right-panel">
+
           <div className="right-header">
+
             <Users size={16} />
 
             <span>
@@ -888,48 +825,50 @@ function App() {
             <span className="user-count">
               {users.length}
             </span>
+
           </div>
 
-          {users.map(
-            (user) => (
-              <div
-                className="collaborator"
-                key={
-                  user.id
-                }
-              >
-                <div className="avatar">
-                  {user.name
-                    .charAt(
-                      0
-                    )
-                    .toUpperCase()}
-                </div>
+          {users.map((user) => (
+            <div
+              className="collaborator"
+              key={user.id}
+            >
 
-                <div className="user-info">
-                  <strong>
-                    {user.name}
-                  </strong>
-
-                  <span>
-                    {user.name ===
-                    name
-                      ? "You"
-                      : "Collaborator"}
-                  </span>
-                </div>
-
-                <span className="online" />
+              <div className="avatar">
+                {user.name
+                  .charAt(0)
+                  .toUpperCase()}
               </div>
-            )
-          )}
+
+              <div className="user-info">
+
+                <strong>
+                  {user.name}
+                </strong>
+
+                <span>
+                  {user.name === name
+                    ? "You"
+                    : "Collaborator"}
+                </span>
+
+              </div>
+
+              <span className="online" />
+
+            </div>
+          ))}
+
         </aside>
+
       </div>
 
       {/* FOOTER */}
 
       <footer>
+
         <div className="footer-left">
+
           <span className="footer-connected">
             ●{" "}
             {connected
@@ -938,19 +877,18 @@ function App() {
           </span>
 
           <span>
-            Shared Room
+            Room: {joinedRoom}
           </span>
+
         </div>
 
         <div className="footer-right">
-          <span>
-            Python
-          </span>
 
-          <span>
-            UTF-8
-          </span>
+          <span>Python</span>
+          <span>UTF-8</span>
+
         </div>
+
       </footer>
 
       {/* SETTINGS */}
@@ -959,18 +897,19 @@ function App() {
         <div
           className="modal-overlay"
           onClick={() =>
-            setShowSettings(
-              false
-            )
+            setShowSettings(false)
           }
         >
+
           <div
             className="settings-modal"
             onClick={(event) =>
               event.stopPropagation()
             }
           >
+
             <div className="settings-header">
+
               <h2>
                 CodeSync Settings
               </h2>
@@ -984,33 +923,31 @@ function App() {
               >
                 <X size={17} />
               </button>
+
             </div>
 
             <div className="setting-row">
-              <div>
-                <strong>
-                  User
-                </strong>
 
+              <div>
+                <strong>User</strong>
+                <span>{name}</span>
+              </div>
+
+            </div>
+
+            <div className="setting-row">
+
+              <div>
+                <strong>Room</strong>
                 <span>
-                  {name}
+                  {joinedRoom}
                 </span>
               </div>
+
             </div>
 
             <div className="setting-row">
-              <div>
-                <strong>
-                  Room
-                </strong>
 
-                <span>
-                  CodeSync
-                </span>
-              </div>
-            </div>
-
-            <div className="setting-row">
               <div>
                 <strong>
                   Collaborators
@@ -1020,25 +957,35 @@ function App() {
                   {users.length}
                 </span>
               </div>
+
             </div>
 
             <div className="setting-row">
+
               <button
                 className="copy-room"
                 onClick={
                   handleShare
                 }
               >
-                <Share2
-                  size={14}
-                />
+                {copied ? (
+                  <Check size={14} />
+                ) : (
+                  <Copy size={14} />
+                )}
 
-                Copy CodeSync link
+                {copied
+                  ? "Copied"
+                  : "Copy CodeSync link"}
               </button>
+
             </div>
+
           </div>
+
         </div>
       )}
+
     </div>
   );
 }
