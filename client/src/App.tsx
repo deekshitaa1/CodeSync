@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import Editor from "@monaco-editor/react";
+import Editor, {
+  OnMount,
+  OnChange,
+} from "@monaco-editor/react";
+import type * as Monaco from "monaco-editor";
 
 import {
   Code2,
@@ -16,8 +20,8 @@ import {
   WifiOff,
   Sparkles,
   Copy,
-  Sun,
   Moon,
+  Sun,
 } from "lucide-react";
 
 import "./App.css";
@@ -29,6 +33,18 @@ import "./App.css";
 type User = {
   id: string;
   name: string;
+};
+
+type CursorPosition = {
+  lineNumber: number;
+  column: number;
+};
+
+type SelectionPosition = {
+  startLineNumber: number;
+  startColumn: number;
+  endLineNumber: number;
+  endColumn: number;
 };
 
 type RunResult = {
@@ -44,19 +60,32 @@ type ServerMessage = {
     | "state"
     | "code-change"
     | "users"
+    | "cursor-change"
+    | "cursor-clear"
     | "run-result"
     | "error";
 
   clientId?: string;
+
   code?: string;
+
   users?: User[];
+
   senderId?: string;
+
+  name?: string;
+
+  position?: CursorPosition;
+
+  selection?: SelectionPosition | null;
+
   result?: RunResult;
+
   message?: string;
 };
 
 /* ======================================================
-   CONFIGURATION
+   CONFIG
    ====================================================== */
 
 const WS_URL =
@@ -97,30 +126,35 @@ function App() {
   const [joining, setJoining] = useState(false);
 
   /* ====================================================
-     SHARED CODE
+     CODE
      ==================================================== */
 
-  const [code, setCode] = useState(INITIAL_CODE);
+  const [code, setCode] =
+    useState<string>(INITIAL_CODE);
 
   /* ====================================================
      USERS
      ==================================================== */
 
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] =
+    useState<User[]>([]);
 
   /* ====================================================
      CONNECTION
      ==================================================== */
 
-  const [connected, setConnected] = useState(false);
+  const [connected, setConnected] =
+    useState(false);
 
   /* ====================================================
      TERMINAL
      ==================================================== */
 
-  const [terminalOpen, setTerminalOpen] = useState(true);
+  const [terminalOpen, setTerminalOpen] =
+    useState(true);
 
-  const [running, setRunning] = useState(false);
+  const [running, setRunning] =
+    useState(false);
 
   const [output, setOutput] = useState(
     "CodeSync terminal ready.\n\nClick Run to execute main.py."
@@ -130,58 +164,97 @@ function App() {
      UI
      ==================================================== */
 
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] =
+    useState(false);
 
-  const [showSettings, setShowSettings] = useState(false);
+  const [showSettings, setShowSettings] =
+    useState(false);
 
-  const [theme, setTheme] = useState<"dark" | "light">(() => {
-    const savedTheme = localStorage.getItem("codesync-theme");
+  const [theme, setTheme] =
+    useState<"dark" | "light">(() => {
+      const saved =
+        localStorage.getItem(
+          "codesync-theme"
+        );
 
-    return savedTheme === "light" ? "light" : "dark";
-  });
-
-  /* ====================================================
-     WEBSOCKET REFS
-     ==================================================== */
-
-  const socketRef = useRef<WebSocket | null>(null);
-
-  const clientIdRef = useRef("");
-
-  const remoteUpdateRef = useRef(false);
+      return saved === "light"
+        ? "light"
+        : "dark";
+    });
 
   /* ====================================================
-     INITIAL URL ROOM
+     MONACO
      ==================================================== */
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+  const editorRef =
+    useRef<Monaco.editor.IStandaloneCodeEditor | null>(
+      null
+    );
 
-    const urlRoom = params.get("room");
+  const monacoRef =
+    useRef<typeof Monaco | null>(null);
 
-    if (urlRoom) {
-      setRoomId(urlRoom);
-    }
-  }, []);
+  /* ====================================================
+     WEBSOCKET
+     ==================================================== */
+
+  const socketRef =
+    useRef<WebSocket | null>(null);
+
+  const clientIdRef =
+    useRef("");
+
+  /* ====================================================
+     REMOTE UPDATE
+     ==================================================== */
+
+  const remoteUpdateRef =
+    useRef(false);
+
+  /* ====================================================
+     CURSOR DECORATIONS
+     ==================================================== */
+
+  const cursorDecorationsRef =
+    useRef<string[]>([]);
+
+  /* ====================================================
+     REMOTE CURSORS
+     ==================================================== */
+
+  const remoteCursorsRef =
+    useRef<
+      Map<
+        string,
+        {
+          name: string;
+          position: CursorPosition;
+          selection?: SelectionPosition | null;
+        }
+      >
+    >(new Map());
 
   /* ====================================================
      THEME
      ==================================================== */
 
-  const changeTheme = (newTheme: "dark" | "light") => {
+  const changeTheme = (
+    newTheme: "dark" | "light"
+  ) => {
     setTheme(newTheme);
 
-    localStorage.setItem("codesync-theme", newTheme);
+    localStorage.setItem(
+      "codesync-theme",
+      newTheme
+    );
   };
 
   /* ====================================================
-     GENERATE ROOM
+     ROOM
      ==================================================== */
 
   const handleGenerateRoom = () => {
-    const newRoom = generateRoomId();
-
-    setRoomId(newRoom);
+    setRoomId(generateRoomId());
   };
 
   /* ====================================================
@@ -189,24 +262,17 @@ function App() {
      ==================================================== */
 
   const handleJoin = () => {
-    const cleanName = nameInput.trim();
-    const cleanRoom = roomId.trim();
+    const cleanName =
+      nameInput.trim();
 
-    /*
-     * If no room is entered, create one.
-     */
+    let cleanRoom =
+      roomId.trim();
 
     if (!cleanRoom) {
-      const newRoom = generateRoomId();
+      cleanRoom = generateRoomId();
 
-      setRoomId(newRoom);
-
-      return;
+      setRoomId(cleanRoom);
     }
-
-    /*
-     * Name is required.
-     */
 
     if (!cleanName) {
       return;
@@ -217,16 +283,310 @@ function App() {
     setJoinedRoom(cleanRoom);
 
     setName(cleanName);
+  };
 
-    /*
-     * Keep room in URL.
-     */
+  /* ====================================================
+     UPDATE REMOTE CURSOR DECORATIONS
+     ==================================================== */
 
-    const url = `${window.location.pathname}?room=${encodeURIComponent(
-      cleanRoom
-    )}`;
+  const updateRemoteCursorDecorations = () => {
+    const editor =
+      editorRef.current;
 
-    window.history.replaceState({}, "", url);
+    const monaco =
+      monacoRef.current;
+
+    if (!editor || !monaco) {
+      return;
+    }
+
+    const decorations: Monaco.editor.IModelDeltaDecoration[] =
+      [];
+
+    for (const [
+      clientId,
+      cursor,
+    ] of remoteCursorsRef.current) {
+      if (
+        clientId ===
+        clientIdRef.current
+      ) {
+        continue;
+      }
+
+      const position =
+        cursor.position;
+
+      /* ==============================================
+         CURSOR
+         ============================================== */
+
+      decorations.push({
+        range:
+          new monaco.Range(
+            position.lineNumber,
+            position.column,
+            position.lineNumber,
+            position.column
+          ),
+
+        options: {
+          className:
+            "codesync-remote-cursor",
+
+          hoverMessage: {
+            value:
+              `**${cursor.name}** is here`,
+          },
+
+          stickiness:
+            monaco.editor.TrackedRangeStickiness
+              .NeverGrowsWhenTypingAtEdges,
+        },
+      });
+
+      /* ==============================================
+         SELECTION
+         ============================================== */
+
+      if (
+        cursor.selection &&
+        (
+          cursor.selection.startLineNumber !==
+            cursor.selection.endLineNumber ||
+          cursor.selection.startColumn !==
+            cursor.selection.endColumn
+        )
+      ) {
+        const selection =
+          cursor.selection;
+
+        decorations.push({
+          range:
+            new monaco.Range(
+              selection.startLineNumber,
+              selection.startColumn,
+              selection.endLineNumber,
+              selection.endColumn
+            ),
+
+          options: {
+            className:
+              "codesync-remote-selection",
+
+            stickiness:
+              monaco.editor
+                .TrackedRangeStickiness
+                .NeverGrowsWhenTypingAtEdges,
+          },
+        });
+      }
+    }
+
+    cursorDecorationsRef.current =
+      editor.deltaDecorations(
+        cursorDecorationsRef.current,
+        decorations
+      );
+  };
+
+  /* ====================================================
+     EDITOR MOUNT
+     ==================================================== */
+
+  const handleEditorMount: OnMount = (
+    editor,
+    monaco
+  ) => {
+    editorRef.current =
+      editor;
+
+    monacoRef.current =
+      monaco;
+
+    updateRemoteCursorDecorations();
+
+    /* ================================================
+       CURSOR POSITION
+       ================================================ */
+
+    editor.onDidChangeCursorPosition(
+      (event) => {
+        const socket =
+          socketRef.current;
+
+        if (
+          !socket ||
+          socket.readyState !==
+            WebSocket.OPEN
+        ) {
+          return;
+        }
+
+        const position =
+          event.position;
+
+        const selection =
+          editor.getSelection();
+
+        socket.send(
+          JSON.stringify({
+            type:
+              "cursor-change",
+
+            position: {
+              lineNumber:
+                position.lineNumber,
+
+              column:
+                position.column,
+            },
+
+            selection:
+              selection
+                ? {
+                    startLineNumber:
+                      selection.startLineNumber,
+
+                    startColumn:
+                      selection.startColumn,
+
+                    endLineNumber:
+                      selection.endLineNumber,
+
+                    endColumn:
+                      selection.endColumn,
+                  }
+                : null,
+          })
+        );
+      }
+    );
+
+    /* ================================================
+       SELECTION CHANGE
+       ================================================ */
+
+    editor.onDidChangeCursorSelection(
+      (event) => {
+        const socket =
+          socketRef.current;
+
+        if (
+          !socket ||
+          socket.readyState !==
+            WebSocket.OPEN
+        ) {
+          return;
+        }
+
+        const position =
+          editor.getPosition();
+
+        const selection =
+          event.selection;
+
+        if (!position) {
+          return;
+        }
+
+        socket.send(
+          JSON.stringify({
+            type:
+              "cursor-change",
+
+            position: {
+              lineNumber:
+                position.lineNumber,
+
+              column:
+                position.column,
+            },
+
+            selection: {
+              startLineNumber:
+                selection.startLineNumber,
+
+              startColumn:
+                selection.startColumn,
+
+              endLineNumber:
+                selection.endLineNumber,
+
+              endColumn:
+                selection.endColumn,
+            },
+          })
+        );
+      }
+    );
+
+    /* ================================================
+       FOCUS
+       ================================================ */
+
+    editor.onDidFocusEditorText(
+      () => {
+        const position =
+          editor.getPosition();
+
+        if (!position) {
+          return;
+        }
+
+        const socket =
+          socketRef.current;
+
+        if (
+          !socket ||
+          socket.readyState !==
+            WebSocket.OPEN
+        ) {
+          return;
+        }
+
+        socket.send(
+          JSON.stringify({
+            type:
+              "cursor-change",
+
+            position: {
+              lineNumber:
+                position.lineNumber,
+
+              column:
+                position.column,
+            },
+          })
+        );
+      }
+    );
+
+    /* ================================================
+       BLUR
+       ================================================ */
+
+    editor.onDidBlurEditorText(
+      () => {
+        const socket =
+          socketRef.current;
+
+        if (
+          !socket ||
+          socket.readyState !==
+            WebSocket.OPEN
+        ) {
+          return;
+        }
+
+        socket.send(
+          JSON.stringify({
+            type:
+              "cursor-clear",
+          })
+        );
+      }
+    );
   };
 
   /* ====================================================
@@ -234,23 +594,25 @@ function App() {
      ==================================================== */
 
   useEffect(() => {
-    if (!name || !joinedRoom) {
+    if (
+      !name ||
+      !joinedRoom
+    ) {
       return;
     }
 
-    const socket = new WebSocket(WS_URL);
+    const socket =
+      new WebSocket(WS_URL);
 
-    socketRef.current = socket;
-
-    /* ==================================================
-       OPEN
-       ================================================== */
+    socketRef.current =
+      socket;
 
     socket.onopen = () => {
-      console.log("CodeSync WebSocket connected");
+      console.log(
+        "CodeSync WebSocket connected"
+      );
 
       setConnected(true);
-
       setJoining(false);
 
       socket.send(
@@ -262,74 +624,111 @@ function App() {
       );
     };
 
-    /* ==================================================
-       MESSAGE
-       ================================================== */
-
-    socket.onmessage = (event) => {
+    socket.onmessage = (
+      event
+    ) => {
       try {
-        const message = JSON.parse(
-          event.data
-        ) as ServerMessage;
+        const message =
+          JSON.parse(
+            event.data
+          ) as ServerMessage;
 
-        console.log("CodeSync message:", message);
+        console.log(
+          "CodeSync message:",
+          message
+        );
 
-        /* ==============================================
+        /* ==========================================
            CONNECTED
-           ============================================== */
+           ========================================== */
 
-        if (message.type === "connected") {
-          if (message.clientId) {
-            clientIdRef.current = message.clientId;
+        if (
+          message.type ===
+          "connected"
+        ) {
+          if (
+            message.clientId
+          ) {
+            clientIdRef.current =
+              message.clientId;
           }
 
           return;
         }
 
-        /* ==============================================
-           INITIAL STATE
-           ============================================== */
+        /* ==========================================
+           STATE
+           ========================================== */
 
-        if (message.type === "state") {
-          if (typeof message.code === "string") {
-            remoteUpdateRef.current = true;
+        if (
+          message.type ===
+          "state"
+        ) {
+          if (
+            typeof message.code ===
+            "string"
+          ) {
+            remoteUpdateRef.current =
+              true;
 
-            setCode(message.code);
+            setCode(
+              message.code
+            );
 
             setOutput(
               "CodeSync terminal ready.\n\nShared code loaded."
             );
 
-            window.setTimeout(() => {
-              remoteUpdateRef.current = false;
-            }, 0);
+            window.setTimeout(
+              () => {
+                remoteUpdateRef.current =
+                  false;
+              },
+              0
+            );
           }
 
-          if (message.users) {
-            setUsers(message.users);
+          if (
+            message.users
+          ) {
+            setUsers(
+              message.users
+            );
           }
+
+          updateRemoteCursorDecorations();
 
           return;
         }
 
-        /* ==============================================
-           REMOTE CODE CHANGE
-           ============================================== */
+        /* ==========================================
+           CODE CHANGE
+           ========================================== */
 
-        if (message.type === "code-change") {
+        if (
+          message.type ===
+          "code-change"
+        ) {
           if (
-            message.senderId === clientIdRef.current
+            message.senderId ===
+            clientIdRef.current
           ) {
             return;
           }
 
-          if (typeof message.code !== "string") {
+          if (
+            typeof message.code !==
+            "string"
+          ) {
             return;
           }
 
-          remoteUpdateRef.current = true;
+          remoteUpdateRef.current =
+            true;
 
-          setCode(message.code);
+          setCode(
+            message.code
+          );
 
           setOutput(
             "Code changed by a collaborator.\n\nTerminal cleared.\nClick Run to execute the latest code."
@@ -337,42 +736,118 @@ function App() {
 
           setRunning(false);
 
-          window.setTimeout(() => {
-            remoteUpdateRef.current = false;
-          }, 0);
+          window.setTimeout(
+            () => {
+              remoteUpdateRef.current =
+                false;
+            },
+            0
+          );
 
           return;
         }
 
-        /* ==============================================
+        /* ==========================================
            USERS
-           ============================================== */
+           ========================================== */
 
-        if (message.type === "users") {
-          setUsers(message.users ?? []);
+        if (
+          message.type ===
+          "users"
+        ) {
+          setUsers(
+            message.users ?? []
+          );
 
           return;
         }
 
-        /* ==============================================
-           RUN RESULT
-           ============================================== */
+        /* ==========================================
+           REMOTE CURSOR
+           ========================================== */
 
-        if (message.type === "run-result") {
-          if (!message.result) {
+        if (
+          message.type ===
+          "cursor-change"
+        ) {
+          if (
+            !message.senderId ||
+            !message.position
+          ) {
             return;
           }
 
-          const result = message.result;
+          remoteCursorsRef.current.set(
+            message.senderId,
+            {
+              name:
+                message.name ??
+                "Collaborator",
+
+              position:
+                message.position,
+
+              selection:
+                message.selection,
+            }
+          );
+
+          updateRemoteCursorDecorations();
+
+          return;
+        }
+
+        /* ==========================================
+           REMOTE CURSOR CLEAR
+           ========================================== */
+
+        if (
+          message.type ===
+          "cursor-clear"
+        ) {
+          if (
+            message.senderId
+          ) {
+            remoteCursorsRef.current.delete(
+              message.senderId
+            );
+          }
+
+          updateRemoteCursorDecorations();
+
+          return;
+        }
+
+        /* ==========================================
+           RUN RESULT
+           ========================================== */
+
+        if (
+          message.type ===
+          "run-result"
+        ) {
+          if (
+            !message.result
+          ) {
+            return;
+          }
+
+          const result =
+            message.result;
 
           let terminalOutput =
             "$ python main.py\n\n";
 
-          if (result.stdout) {
-            terminalOutput += result.stdout;
+          if (
+            result.stdout
+          ) {
+            terminalOutput +=
+              result.stdout;
           }
 
-          if (result.stderr) {
+          if (
+            result.stderr
+          ) {
             terminalOutput +=
               `\n\n[stderr]\n${result.stderr}`;
           }
@@ -381,32 +856,41 @@ function App() {
             !result.stdout &&
             !result.stderr
           ) {
-            terminalOutput += "(no output)";
+            terminalOutput +=
+              "(no output)";
           }
 
           terminalOutput +=
             `\n\nExit code: ${
-              result.exitCode ?? 0
+              result.exitCode ??
+              0
             }`;
 
-          setOutput(terminalOutput);
+          setOutput(
+            terminalOutput
+          );
 
           setRunning(false);
 
           return;
         }
 
-        /* ==============================================
+        /* ==========================================
            ERROR
-           ============================================== */
+           ========================================== */
 
-        if (message.type === "error") {
-          console.error(message.message);
+        if (
+          message.type ===
+          "error"
+        ) {
+          console.error(
+            message.message
+          );
 
           setOutput(
             `Server error:\n\n${
               message.message ??
-              "Unknown server error."
+              "Unknown error"
             }`
           );
 
@@ -422,63 +906,61 @@ function App() {
       }
     };
 
-    /* ==================================================
-       CLOSE
-       ================================================== */
-
     socket.onclose = () => {
       console.log(
         "CodeSync WebSocket disconnected"
       );
 
       setConnected(false);
-
       setJoining(false);
+
+      remoteCursorsRef.current.clear();
+
+      updateRemoteCursorDecorations();
     };
 
-    /* ==================================================
-       ERROR
-       ================================================== */
-
-    socket.onerror = (error) => {
+    socket.onerror = (
+      error
+    ) => {
       console.error(
-        "CodeSync WebSocket error:",
+        "WebSocket error:",
         error
       );
 
       setConnected(false);
-
       setJoining(false);
     };
-
-    /* ==================================================
-       CLEANUP
-       ================================================== */
 
     return () => {
       socket.close();
 
-      socketRef.current = null;
+      socketRef.current =
+        null;
+
+      remoteCursorsRef.current.clear();
+
+      updateRemoteCursorDecorations();
     };
-  }, [name, joinedRoom]);
+  }, [
+    name,
+    joinedRoom,
+  ]);
 
-  /* ======================================================
+  /* ====================================================
      CODE CHANGE
-     ====================================================== */
+     ==================================================== */
 
-  const handleCodeChange = (
-    value: string | undefined
+  const handleCodeChange: OnChange = (
+    value
   ) => {
-    const newCode = value ?? "";
+    const newCode =
+      value ?? "";
 
     setCode(newCode);
 
-    /*
-     * Don't send changes caused by
-     * remote synchronization.
-     */
-
-    if (remoteUpdateRef.current) {
+    if (
+      remoteUpdateRef.current
+    ) {
       return;
     }
 
@@ -486,31 +968,38 @@ function App() {
       "Code modified.\n\nTerminal cleared.\nClick Run to execute the latest code."
     );
 
-    const socket = socketRef.current;
+    const socket =
+      socketRef.current;
 
     if (
       socket &&
-      socket.readyState === WebSocket.OPEN
+      socket.readyState ===
+        WebSocket.OPEN
     ) {
       socket.send(
         JSON.stringify({
-          type: "code-change",
-          code: newCode,
+          type:
+            "code-change",
+
+          code:
+            newCode,
         })
       );
     }
   };
 
-  /* ======================================================
+  /* ====================================================
      RUN
-     ====================================================== */
+     ==================================================== */
 
   const handleRun = () => {
-    const socket = socketRef.current;
+    const socket =
+      socketRef.current;
 
     if (
       !socket ||
-      socket.readyState !== WebSocket.OPEN
+      socket.readyState !==
+        WebSocket.OPEN
     ) {
       setOutput(
         "Not connected to CodeSync server."
@@ -529,47 +1018,51 @@ function App() {
 
     socket.send(
       JSON.stringify({
-        type: "run",
+        type:
+          "run",
       })
     );
   };
 
-  /* ======================================================
+  /* ====================================================
      SHARE
-     ====================================================== */
+     ==================================================== */
 
-  const handleShare = async () => {
-    try {
-      const url =
-        `${window.location.origin}/?room=${encodeURIComponent(
-          joinedRoom
-        )}`;
+  const handleShare =
+    async () => {
+      try {
+        const url =
+          `${window.location.origin}/?room=${encodeURIComponent(
+            joinedRoom
+          )}`;
 
-      await navigator.clipboard.writeText(url);
+        await navigator.clipboard.writeText(
+          url
+        );
 
-      setCopied(true);
+        setCopied(true);
 
-      window.setTimeout(() => {
-        setCopied(false);
-      }, 2000);
-    } catch {
-      window.prompt(
-        "Copy this CodeSync link:",
-        window.location.href
-      );
-    }
-  };
+        window.setTimeout(
+          () => {
+            setCopied(false);
+          },
+          2000
+        );
+      } catch {
+        window.prompt(
+          "Copy this CodeSync link:",
+          window.location.href
+        );
+      }
+    };
 
-  /* ======================================================
+  /* ====================================================
      LOGIN SCREEN
-     ====================================================== */
+     ==================================================== */
 
   if (!name) {
     return (
       <div className="join-screen">
-
-        {/* STATUS */}
-
         <div className="joining-status">
           <span className="status-spinner" />
 
@@ -578,20 +1071,10 @@ function App() {
             : "Ready to collaborate"}
         </div>
 
-        {/* GREEN CORNER */}
-
         <div className="green-corner" />
 
-        {/* MAIN LOGIN LAYOUT */}
-
         <div className="join-layout">
-
-          {/* ============================================
-              LEFT VISUAL
-              ============================================ */}
-
           <section className="join-visual">
-
             <div className="illustration-glow" />
 
             <img
@@ -599,25 +1082,15 @@ function App() {
               alt="Developers collaborating"
               className="collaboration-image"
             />
-
           </section>
 
-          {/* ============================================
-              RIGHT LOGIN
-              ============================================ */}
-
           <section className="join-content">
-
-            {/* BRAND */}
-
             <div className="brand-large">
-
               <div className="brand-icon">
                 <Code2 size={34} />
               </div>
 
               <div className="brand-text">
-
                 <div className="brand-name">
                   <span>Code</span>
 
@@ -630,19 +1103,11 @@ function App() {
                   Code, Chat and Collaborate.
                   It's All in Sync.
                 </div>
-
               </div>
-
             </div>
 
-            {/* FORM */}
-
             <div className="join-form">
-
-              {/* ROOM */}
-
               <div className="input-wrapper">
-
                 <input
                   className="room-input"
                   value={roomId}
@@ -654,13 +1119,9 @@ function App() {
                   placeholder="Room ID"
                   autoComplete="off"
                 />
-
               </div>
 
-              {/* NAME */}
-
               <div className="input-wrapper">
-
                 <input
                   className="name-input"
                   value={nameInput}
@@ -671,7 +1132,8 @@ function App() {
                   }
                   onKeyDown={(event) => {
                     if (
-                      event.key === "Enter"
+                      event.key ===
+                      "Enter"
                     ) {
                       handleJoin();
                     }
@@ -679,36 +1141,28 @@ function App() {
                   placeholder="Your name"
                   autoComplete="name"
                 />
-
               </div>
-
-              {/* JOIN */}
 
               <button
                 className="join-button"
-                onClick={handleJoin}
+                onClick={
+                  handleJoin
+                }
                 disabled={
-                  !nameInput.trim() ||
-                  joining
+                  !nameInput.trim()
                 }
               >
                 <span>
-                  {joining
-                    ? "Joining..."
-                    : "Join"}
+                  Join
                 </span>
               </button>
-
-              {/* GENERATE ROOM */}
 
               <button
                 className="generate-room"
                 onClick={
                   handleGenerateRoom
                 }
-                type="button"
               >
-
                 <Sparkles size={17} />
 
                 <span>
@@ -716,28 +1170,22 @@ function App() {
                   <br />
                   Id
                 </span>
-
               </button>
-
             </div>
-
-            {/* DESCRIPTION */}
 
             <div className="join-description">
               Collaborate on code in
               real-time with your team.
             </div>
-
           </section>
-
         </div>
       </div>
     );
   }
 
-  /* ======================================================
+  /* ====================================================
      MAIN IDE
-     ====================================================== */
+     ==================================================== */
 
   return (
     <div
@@ -747,23 +1195,17 @@ function App() {
           : "theme-dark"
       }`}
     >
-
-      {/* ==================================================
+      {/* ================================================
           TOP BAR
-          ================================================== */}
+          ================================================ */}
 
       <header className="topbar">
-
-        {/* BRAND */}
-
         <div className="brand">
-
           <div className="logo">
             <Code2 size={21} />
           </div>
 
           <div>
-
             <div className="title">
               CodeSync
             </div>
@@ -771,19 +1213,11 @@ function App() {
             <div className="subtitle">
               REAL-TIME COLLABORATIVE IDE
             </div>
-
           </div>
-
         </div>
 
-        {/* ACTIONS */}
-
         <div className="top-actions">
-
-          {/* CONNECTION */}
-
           <div className="connection">
-
             {connected ? (
               <>
                 <Wifi size={15} />
@@ -795,29 +1229,21 @@ function App() {
                 Disconnected
               </>
             )}
-
           </div>
 
-          {/* ROOM */}
-
           <div className="room">
-
             Room:
-
             <strong>
               {joinedRoom}
             </strong>
-
           </div>
-
-          {/* SHARE */}
 
           <button
             className="share-button"
-            onClick={handleShare}
-            type="button"
+            onClick={
+              handleShare
+            }
           >
-
             {copied ? (
               <Check size={15} />
             ) : (
@@ -827,113 +1253,90 @@ function App() {
             {copied
               ? "Copied"
               : "Share"}
-
           </button>
-
-          {/* SETTINGS */}
 
           <button
             className="icon-button"
             onClick={() =>
-              setShowSettings(true)
+              setShowSettings(
+                true
+              )
             }
-            type="button"
-            aria-label="Settings"
           >
-            <Settings size={17} />
+            <Settings
+              size={17}
+            />
           </button>
-
         </div>
-
       </header>
 
-      {/* ==================================================
+      {/* ================================================
           WORKSPACE
-          ================================================== */}
+          ================================================ */}
 
       <div className="workspace">
-
-        {/* =================================================
-            LEFT SIDEBAR
-            ================================================= */}
+        {/* SIDEBAR */}
 
         <aside className="sidebar">
-
           <div className="sidebar-title">
             EXPLORER
           </div>
 
           <div className="folder">
-
             <Folder size={15} />
 
             <span>
               src
             </span>
-
           </div>
 
           <div className="files">
-
-            <button
-              className="file active"
-              type="button"
-            >
-
-              <FileCode2 size={14} />
+            <button className="file active">
+              <FileCode2
+                size={14}
+              />
 
               main.py
-
             </button>
-
           </div>
-
         </aside>
 
-        {/* =================================================
-            EDITOR
-            ================================================= */}
+        {/* EDITOR */}
 
         <main className="editor">
-
-          {/* EDITOR HEADER */}
-
           <div className="editor-header">
-
             <div className="tab">
-
-              <FileCode2 size={14} />
+              <FileCode2
+                size={14}
+              />
 
               main.py
-
             </div>
 
             <button
               className="run-button"
-              onClick={handleRun}
-              disabled={running}
-              type="button"
+              onClick={
+                handleRun
+              }
+              disabled={
+                running
+              }
             >
-
               <Play size={14} />
 
               {running
                 ? "Running..."
                 : "Run"}
-
             </button>
-
           </div>
 
-          {/* MONACO */}
-
           <div className="monaco-container">
-
             <Editor
               height="100%"
               language="python"
               theme={
-                theme === "light"
+                theme ===
+                "light"
                   ? "vs"
                   : "vs-dark"
               }
@@ -941,46 +1344,51 @@ function App() {
               onChange={
                 handleCodeChange
               }
+              onMount={
+                handleEditorMount
+              }
               options={{
                 minimap: {
-                  enabled: false,
+                  enabled:
+                    false,
                 },
 
                 fontSize: 14,
 
-                lineNumbers: "on",
+                lineNumbers:
+                  "on",
 
-                automaticLayout: true,
+                automaticLayout:
+                  true,
 
                 padding: {
                   top: 15,
                 },
 
-                scrollBeyondLastLine: false,
+                scrollBeyondLastLine:
+                  false,
 
                 tabSize: 4,
 
-                wordWrap: "on",
+                wordWrap:
+                  "on",
 
-                smoothScrolling: true,
+                smoothScrolling:
+                  true,
 
-                cursorBlinking: "smooth",
+                cursorBlinking:
+                  "smooth",
 
-                renderWhitespace: "selection",
+                renderWhitespace:
+                  "selection",
 
-                bracketPairColorization: {
-                  enabled: true,
-                },
-
-                suggestOnTriggerCharacters: true,
+                cursorSmoothCaretAnimation:
+                  "on",
               }}
             />
-
           </div>
 
-          {/* =================================================
-              TERMINAL
-              ================================================= */}
+          {/* TERMINAL */}
 
           {terminalOpen && (
             <div
@@ -990,53 +1398,38 @@ function App() {
                   : "terminal-dark"
               }`}
             >
-
-              {/* TERMINAL HEADER */}
-
               <div className="terminal-header">
+                <div>
+                  <Terminal
+                    size={14}
+                  />
 
-                <div className="terminal-title">
-
-                  <Terminal size={14} />
-
-                  <span>
-                    TERMINAL
-                  </span>
-
+                  TERMINAL
                 </div>
 
                 <button
                   className="terminal-close"
                   onClick={() =>
-                    setTerminalOpen(false)
+                    setTerminalOpen(
+                      false
+                    )
                   }
-                  type="button"
-                  aria-label="Close terminal"
                 >
                   <X size={14} />
                 </button>
-
               </div>
-
-              {/* TERMINAL CONTENT */}
 
               <pre className="terminal-output">
                 {output}
               </pre>
-
             </div>
           )}
-
         </main>
 
-        {/* =================================================
-            RIGHT COLLABORATORS PANEL
-            ================================================= */}
+        {/* RIGHT PANEL */}
 
         <aside className="right-panel">
-
           <div className="right-header">
-
             <Users size={16} />
 
             <span>
@@ -1046,86 +1439,59 @@ function App() {
             <span className="user-count">
               {users.length}
             </span>
-
           </div>
 
-          {/* USERS */}
-
-          {users.length === 0 ? (
-            <div className="empty-collaborators">
-              No collaborators yet.
-            </div>
-          ) : (
-            users.map((user) => (
+          {users.map(
+            (user) => (
               <div
                 className="collaborator"
                 key={user.id}
               >
-
-                {/* AVATAR */}
-
                 <div className="avatar">
-
                   {user.name
                     .charAt(0)
                     .toUpperCase()}
-
                 </div>
 
-                {/* USER INFO */}
-
                 <div className="user-info">
-
                   <strong>
                     {user.name}
                   </strong>
 
                   <span>
-                    {user.name === name
+                    {user.name ===
+                    name
                       ? "You"
                       : "Collaborator"}
                   </span>
-
                 </div>
 
-                {/* ONLINE */}
-
                 <span className="online" />
-
               </div>
-            ))
+            )
           )}
-
         </aside>
-
       </div>
 
-      {/* ==================================================
+      {/* ================================================
           FOOTER
-          ================================================== */}
+          ================================================ */}
 
       <footer>
-
         <div className="footer-left">
-
           <span className="footer-connected">
-
             ●{" "}
-
             {connected
               ? "Connected"
               : "Offline"}
-
           </span>
 
           <span>
             Room: {joinedRoom}
           </span>
-
         </div>
 
         <div className="footer-right">
-
           <span>
             Python
           </span>
@@ -1133,62 +1499,46 @@ function App() {
           <span>
             UTF-8
           </span>
-
         </div>
-
       </footer>
 
-      {/* ==================================================
-          SETTINGS MODAL
-          ================================================== */}
+      {/* ================================================
+          SETTINGS
+          ================================================ */}
 
       {showSettings && (
         <div
           className="modal-overlay"
           onClick={() =>
-            setShowSettings(false)
+            setShowSettings(
+              false
+            )
           }
         >
-
           <div
             className="settings-modal"
             onClick={(event) =>
               event.stopPropagation()
             }
           >
-
-            {/* HEADER */}
-
             <div className="settings-header">
-
-              <div>
-                <h2>
-                  CodeSync Settings
-                </h2>
-
-                <span>
-                  Workspace preferences
-                </span>
-              </div>
+              <h2>
+                CodeSync Settings
+              </h2>
 
               <button
                 onClick={() =>
-                  setShowSettings(false)
+                  setShowSettings(
+                    false
+                  )
                 }
-                type="button"
-                aria-label="Close settings"
               >
                 <X size={17} />
               </button>
-
             </div>
 
-            {/* USER */}
-
             <div className="setting-row">
-
               <div>
-
                 <strong>
                   User
                 </strong>
@@ -1196,17 +1546,11 @@ function App() {
                 <span>
                   {name}
                 </span>
-
               </div>
-
             </div>
 
-            {/* ROOM */}
-
             <div className="setting-row">
-
               <div>
-
                 <strong>
                   Room
                 </strong>
@@ -1214,17 +1558,11 @@ function App() {
                 <span>
                   {joinedRoom}
                 </span>
-
               </div>
-
             </div>
 
-            {/* COLLABORATORS */}
-
             <div className="setting-row">
-
               <div>
-
                 <strong>
                   Collaborators
                 </strong>
@@ -1232,136 +1570,93 @@ function App() {
                 <span>
                   {users.length}
                 </span>
-
               </div>
-
             </div>
 
             {/* THEME */}
 
-            <div className="setting-row theme-setting">
-
+            <div className="setting-row">
               <div>
-
                 <strong>
-                  Appearance
+                  Editor Theme
                 </strong>
 
                 <span>
-                  Choose your editor theme
+                  {theme ===
+                  "dark"
+                    ? "Dark"
+                    : "Light"}
                 </span>
-
               </div>
 
               <div className="theme-buttons">
-
                 <button
-                  type="button"
                   className={
-                    theme === "dark"
-                      ? "theme-option active"
-                      : "theme-option"
+                    theme ===
+                    "dark"
+                      ? "theme-active"
+                      : ""
                   }
                   onClick={() =>
-                    changeTheme("dark")
+                    changeTheme(
+                      "dark"
+                    )
                   }
                 >
-
-                  <Moon size={15} />
+                  <Moon
+                    size={14}
+                  />
 
                   Dark
-
                 </button>
 
                 <button
-                  type="button"
                   className={
-                    theme === "light"
-                      ? "theme-option active"
-                      : "theme-option"
+                    theme ===
+                    "light"
+                      ? "theme-active"
+                      : ""
                   }
                   onClick={() =>
-                    changeTheme("light")
+                    changeTheme(
+                      "light"
+                    )
                   }
                 >
-
-                  <Sun size={15} />
+                  <Sun
+                    size={14}
+                  />
 
                   Light
-
                 </button>
-
               </div>
-
             </div>
 
-            {/* TERMINAL */}
-
             <div className="setting-row">
-
-              <div>
-
-                <strong>
-                  Terminal
-                </strong>
-
-                <span>
-                  {terminalOpen
-                    ? "Visible"
-                    : "Hidden"}
-                </span>
-
-              </div>
-
               <button
                 className="copy-room"
-                onClick={() =>
-                  setTerminalOpen(
-                    !terminalOpen
-                  )
+                onClick={
+                  handleShare
                 }
-                type="button"
               >
-
-                <Terminal size={14} />
-
-                {terminalOpen
-                  ? "Hide Terminal"
-                  : "Show Terminal"}
-
-              </button>
-
-            </div>
-
-            {/* COPY LINK */}
-
-            <div className="setting-row">
-
-              <button
-                className="copy-room"
-                onClick={handleShare}
-                type="button"
-              >
-
                 {copied ? (
-                  <Check size={14} />
+                  <Check
+                    size={14}
+                  />
                 ) : (
-                  <Copy size={14} />
+                  <Copy
+                    size={14}
+                  />
                 )}
 
                 {copied
                   ? "Copied"
                   : "Copy CodeSync link"}
-
               </button>
-
             </div>
-
           </div>
-
         </div>
       )}
-
     </div>
   );
 }

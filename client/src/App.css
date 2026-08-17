@@ -1192,3 +1192,363 @@ footer {
         display: none;
     }
 }
+/* ======================================================
+   CODESYNC THEME SYSTEM
+   ====================================================== */
+
+.app {
+    --bg-main: #1e1f22;
+    --bg-panel: #25272b;
+    --bg-header: #24262a;
+    --bg-editor: #1e1f22;
+    --bg-terminal: #17181a;
+    --border: #36383e;
+    --text: #ffffff;
+    --text-secondary: #a8adb6;
+    --text-muted: #777c85;
+    --green: #32df7b;
+
+    background: var(--bg-main);
+    color: var(--text);
+}
+
+
+/* ======================================================
+   DARK THEME
+   ====================================================== */
+
+.theme-dark {
+    --bg-main: #1e1f22;
+    --bg-panel: #25272b;
+    --bg-header: #24262a;
+    --bg-editor: #1e1f22;
+    --bg-terminal: #17181a;
+    --border: #36383e;
+    --text: #ffffff;
+    --text-secondary: #a8adb6;
+    --text-muted: #777c85;
+    --green: #32df7b;
+}
+
+
+/* ======================================================
+   LIGHT THEME
+   ====================================================== */
+
+.theme-light {
+    --bg-main: #f4f6f8;
+    --bg-panel: #ffffff;
+    --bg-header: #ffffff;
+    --bg-editor: #ffffff;
+    --bg-terminal: #f8fafc;
+    --border: #d9dee5;
+    --text: #17191d;
+    --text-secondary: #5f6670;
+    --text-muted: #7a818c;
+    --green: #19c968;
+}
+
+
+/* ======================================================
+   LIGHT TOP BAR
+   ====================================================== */
+
+.theme-light .topbar {
+    background: var(--bg-header);
+    border-bottom: 1px solid var(--border);
+}
+
+.theme-light .title {
+    color: #17191d;
+}
+
+.theme-light .subtitle {
+    color: #7a818c;
+}
+
+.theme-light .room {
+    color: #666d77;
+}
+
+.theme-light .room strong {
+    color: #17191d;
+}
+
+
+/* ======================================================
+   LIGHT SIDEBAR
+   ====================================================== */
+
+.theme-light .sidebar {
+    background: #f8fafc;
+    border-right: 1px solid var(--border);
+}
+
+.theme-light .sidebar-title {
+    color: #737b86;
+}
+
+.theme-light .folder,
+.theme-light .file {
+    color: #4e5661;
+}
+
+.theme-light .file.active {
+    background: #e8edf2;
+    color: #17191d;
+}
+
+
+/* ======================================================
+   LIGHT EDITOR
+   ====================================================== */
+
+.theme-light .editor {
+    background: #ffffff;
+}
+
+.theme-light .editor-header {
+    background: #ffffff;
+    border-bottom: 1px solid var(--border);
+}
+
+.theme-light .tab {
+    color: #343a43;
+}
+
+
+/* ======================================================
+   LIGHT RIGHT PANEL
+   ====================================================== */
+
+.theme-light .right-panel {
+    background: #f8fafc;
+    border-left: 1px solid var(--border);
+}
+
+.theme-light .right-header {
+    color: #343a43;
+}
+
+.theme-light .user-count {
+    background: #e8edf2;
+    color: #68717c;
+}
+
+.theme-light .collaborator {
+    color: #343a43;
+}
+
+.theme-light .user-info strong {
+    color: #20242a;
+}
+
+.theme-light .user-info span {
+    color: #7a818c;
+}
+
+
+/* ======================================================
+   LIGHT BUTTONS
+   ====================================================== */
+
+.theme-light .share-button,
+.theme-light .icon-button {
+    background: #ffffff;
+    border-color: #d4dae1;
+    color: #343a43;
+}
+
+.theme-light .share-button:hover,
+.theme-light .icon-button:hover {
+    border-color: var(--green);
+    color: var(--green);
+}
+
+
+/* ======================================================
+   TERMINAL
+   ====================================================== */
+
+.terminal {
+    background: var(--bg-terminal);
+    border-top: 1px solid var(--border);
+}
+
+.terminal-header {
+    color: var(--text-secondary);
+}
+
+.terminal-output {
+    color: var(--text);
+}
+
+
+/* ======================================================
+   LIGHT TERMINAL
+   ====================================================== */
+
+.terminal-light {
+    background: #f8fafc;
+}
+
+.terminal-light .terminal-header {
+    background: #ffffff;
+    color: #626b76;
+    border-bottom: 1px solid #d9dee5;
+}
+
+.terminal-light .terminal-output {
+    color: #20242a;
+    background: #f8fafc;
+}
+
+
+/* ======================================================
+   DARK TERMINAL
+   ====================================================== */
+
+.terminal-dark {
+    background: #17181a;
+}
+
+.terminal-dark .terminal-header {
+    background: #17181a;
+    color: #9ca1aa;
+}
+
+.terminal-dark .terminal-output {
+    color: #d3d7dd;
+}
+
+
+/* ======================================================
+   SETTINGS
+   ====================================================== */
+
+.theme-setting {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 25px;
+}
+
+.theme-setting > div:first-child {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.theme-setting strong {
+    color: var(--text);
+    font-size: 13px;
+}
+
+.theme-setting span {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+
+/* ======================================================
+   THEME SWITCHER
+   ====================================================== */
+
+.theme-switcher {
+    display: flex;
+    gap: 6px;
+}
+
+.theme-option {
+    padding: 8px 12px;
+
+    border: 1px solid var(--border);
+    border-radius: 7px;
+
+    background: transparent;
+    color: var(--text-secondary);
+
+    font-size: 11px;
+    cursor: pointer;
+
+    transition:
+        background 0.15s ease,
+        border-color 0.15s ease,
+        color 0.15s ease;
+}
+
+.theme-option:hover {
+    border-color: var(--green);
+    color: var(--green);
+}
+
+.theme-option.active {
+    background: var(--green);
+    border-color: var(--green);
+    color: #07150d;
+    font-weight: 700;
+}
+
+
+/* ======================================================
+   SETTINGS MODAL LIGHT MODE
+   ====================================================== */
+
+.theme-light .settings-modal {
+    background: #ffffff;
+    color: #17191d;
+    border-color: #d9dee5;
+}
+
+.theme-light .settings-header {
+    border-bottom-color: #d9dee5;
+}
+
+.theme-light .settings-header h2 {
+    color: #17191d;
+}
+
+.theme-light .setting-row {
+    border-bottom-color: #e4e8ed;
+}
+
+.theme-light .setting-row strong {
+    color: #20242a;
+}
+
+.theme-light .setting-row span {
+    color: #727a85;
+}
+
+
+/* ======================================================
+   MOBILE
+   ====================================================== */
+
+@media (max-width: 900px) {
+
+    .workspace {
+        grid-template-columns: 150px 1fr;
+    }
+
+    .right-panel {
+        display: none;
+    }
+
+}
+
+@media (max-width: 650px) {
+
+    .workspace {
+        grid-template-columns: 1fr;
+    }
+
+    .sidebar {
+        display: none;
+    }
+
+    .top-actions .room {
+        display: none;
+    }
+
+}
