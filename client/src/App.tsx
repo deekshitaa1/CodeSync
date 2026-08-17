@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
+
 import {
   Code2,
   Users,
@@ -50,8 +51,9 @@ type ServerMessage = {
   message?: string;
 };
 
-const WS_URL = "ws://localhost:4000/collaboration";
 
+const WS_URL =
+  "wss://codesync-server-ec9a.onrender.com/collaboration";
 const INITIAL_CODE = `def hello():
     print("Hello from CodeSync!")
 
@@ -529,38 +531,24 @@ function App() {
    * ======================================================
    */
 
-  const handleRun = () => {
-    const socket =
-      socketRef.current;
+   const handleRun = () => {
+        const socket = socketRef.current;
 
-    if (
-      !socket ||
-      socket.readyState !==
-        WebSocket.OPEN
-    ) {
-      setOutput(
-        "Not connected to CodeSync server."
-      );
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+            setOutput("Not connected to CodeSync server.");
+            return;
+        }
 
-      return;
-    }
+        setRunning(true);
+        setTerminalOpen(true);
+        setOutput("$ python main.py\n\nRunning...");
 
-    setTerminalOpen(true);
-
-    setRunning(true);
-
-    setOutput(
-      "$ python main.py\n\nRunning..."
-    );
-
-    socket.send(
-      JSON.stringify({
-        type: "run",
-        code,
-      })
-    );
-  };
-
+        socket.send(
+            JSON.stringify({
+                type: "run",
+            })
+        );
+    };
   /*
    * ======================================================
    * SHARE CURRENT URL
