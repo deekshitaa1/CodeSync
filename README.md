@@ -1,132 +1,117 @@
+<div align="center">
+
 # CodeSync
 
-**Real-time collaborative coding in the browser.**
+### Real-time collaborative coding in the browser
 
-CodeSync is a browser-based collaborative IDE for teams, students, interviewers, mentors, and developers who need to work on the same code in real time without repeatedly sharing files or switching between editors.
+**Edit. Collaborate. Run. — in one shared workspace.**
 
-It provides a shared coding room where participants can edit the same Python file, see collaborator presence and cursor activity, share a room, and execute the current program from an integrated terminal.
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Open%20CodeSync-2ea44f?style=for-the-badge)](https://codesync-1-goz9.onrender.com/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5%2B-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=111827)](https://react.dev/)
+[![WebSocket](https://img.shields.io/badge/WebSocket-Real--Time-111827?style=for-the-badge)](https://developer.mozilla.org/en-US/docs/Web/API/WebSocket)
+[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
+
+[Live Demo](https://codesync-1-goz9.onrender.com/) · [GitHub Repository](https://github.com/deekshitaa1/CodeSync)
+
+</div>
+
+---
+
+## What is CodeSync?
+
+CodeSync is a **full-stack, browser-based collaborative IDE** that lets multiple people work on the same Python program in real time.
+
+Instead of sending files, screenshots, or copied code back and forth, users join the same room and work inside one shared editor. Code changes, collaborator presence, cursor positions, and selections are synchronized through WebSockets, while the current program can be executed from the integrated terminal.
+
+### The problem it solves
+
+> **How can two or more people write, review, debug, and run the same code without being in the same editor?**
+
+CodeSync provides a shared workspace for that workflow.
+
+---
+
+## Where is it useful?
+
+| Use case | How CodeSync helps |
+| --- | --- |
+| **Pair Programming** | Two developers edit the same code and see changes instantly. |
+| **Technical Interviews** | Interviewers and candidates can work in one shared coding environment. |
+| **Mentoring & Teaching** | A mentor can follow a learner's code, cursor, and selections in real time. |
+| **Team Debugging** | Developers can inspect, modify, and run the same code during a debugging session. |
+| **Coding Practice** | Students can solve programming problems together without exchanging files. |
+| **Remote Development Sessions** | Teams get a browser-based shared coding workspace for live sessions. |
+
+---
 
 ## What I Built
 
-CodeSync is a full-stack real-time collaboration system, not a static code-editor UI.
+CodeSync is more than a Monaco Editor interface. I built the **real-time client-server collaboration layer and execution workflow** behind the application.
 
-- **Collaborative editing** — multiple users work on the same `main.py` in a shared room.
-- **Real-time synchronization** — code changes are propagated through WebSockets.
-- **Live presence** — connected collaborators are shown in the workspace.
-- **Remote cursor and selection tracking** — users can see where collaborators are working.
-- **Room-based collaboration** — each session is isolated by a room ID.
-- **Code execution** — the current Python program is sent to the backend and stdout, stderr, and exit code are returned to the terminal.
+- **Shared code editing** — multiple users can edit the same `main.py`.
+- **Real-time synchronization** — code changes are delivered through WebSockets without page refreshes.
+- **Room-based sessions** — users collaborate inside an isolated room identified by a room ID.
+- **Live presence** — connected collaborators are displayed in the workspace.
+- **Remote cursors & selections** — users can see where collaborators are currently working.
+- **Integrated Python execution** — the current code is sent to the backend and execution results are returned to the terminal.
+- **stdout / stderr / exit codes** — execution results and Python errors are displayed directly in the IDE.
 - **Shareable rooms** — generate a room and share the collaboration URL.
-- **Developer-focused IDE** — Monaco Editor, file explorer, terminal, connection status, theme switching, and collaborator panel.
-- **Separated frontend/backend architecture** — React + TypeScript client with a Node.js + TypeScript WebSocket server.
+- **IDE experience** — Monaco Editor, explorer, terminal, connection status, collaborator panel, and light/dark themes.
 
-## Why CodeSync?
+---
 
-Traditional collaboration often looks like:
-
-`Write code → save file → send file → explain changes → merge edits`
-
-CodeSync turns that into:
-
-`Join room → edit together → see changes live → run the shared code`
-
-### Where It Can Be Used
-
-| Use case | Value |
-| --- | --- |
-| **Pair programming** | Developers work in the same editor and follow changes live. |
-| **Technical interviews** | Interviewers and candidates collaborate on coding problems without exchanging files. |
-| **Mentoring & teaching** | Mentors can follow a learner's code and cursor while explaining a solution. |
-| **Team debugging** | Developers can inspect and modify the same code during troubleshooting. |
-| **Collaborative coding practice** | Students can solve programming problems together in one workspace. |
-| **Remote development sessions** | Teams get a shared browser coding environment instead of separate local files. |
-
-## Architecture
+## Product Flow
 
 ```text
-                         CodeSync
-                            │
-              ┌─────────────┴─────────────┐
-              │                           │
-        React + Vite                 Node.js Server
-              │                           │
-       Monaco Editor                 Express API
-              │                           │
-              └──── WebSocket ────────────┘
-                            │
-                 ┌──────────┴──────────┐
-                 │                     │
-          Collaboration State     Code Execution
-                 │                     │
-              Rooms              Python Runner
-                 │
-             Users / Cursors
+Open CodeSync
+      │
+      ▼
+Create / Enter Room ID
+      │
+      ▼
+Join with a Name
+      │
+      ▼
+WebSocket Connection
+      │
+      ▼
+Shared Editor + Presence
+      │
+      ├───────────────┐
+      ▼               ▼
+Edit Together     Track Cursors
+      │               │
+      └───────┬───────┘
+              ▼
+         Click Run
+              │
+              ▼
+       Backend executes
+          main.py
+              │
+              ▼
+    stdout / stderr / exit code
+              │
+              ▼
+       Integrated Terminal
 ```
 
-## Tech Stack
+---
 
-### Frontend
+## Key Features
 
-- React 19
-- TypeScript
-- Vite
-- Monaco Editor
-- WebSocket
-- Yjs / Y-WebSocket dependencies
-- React Router
-- Lucide React
+### Real-Time Collaborative Editor
 
-### Backend
+A shared Monaco-based editor allows multiple participants to work on the same Python file while code changes are synchronized through the backend.
 
-- Node.js
-- TypeScript
-- Express
-- WebSocket (`ws`)
-- `execa` for process execution
-- CORS
-- dotenv
+### Live Collaboration Awareness
 
-## Core Flow
+CodeSync tracks collaborator presence, cursor positions, and selections so participants can understand what others are working on without repeatedly communicating their location manually.
 
-```text
-1. User opens CodeSync
-        ↓
-2. Creates or enters a room ID
-        ↓
-3. Joins with a display name
-        ↓
-4. WebSocket connection is established
-        ↓
-5. Server places the user in the room
-        ↓
-6. Code / presence / cursor events are synchronized
-        ↓
-7. User clicks Run
-        ↓
-8. Backend executes the shared Python code
-        ↓
-9. stdout / stderr / exit code return to the terminal
-```
+### Integrated Terminal
 
-## Real-Time Collaboration
-
-The collaboration layer uses event-driven WebSocket communication for:
-
-- `join`
-- `state`
-- `code-change`
-- `users`
-- `cursor-change`
-- `cursor-clear`
-- `run`
-- `run-result`
-- `error`
-
-This avoids page refreshes and polling for the core collaboration workflow.
-
-## Code Execution
-
-CodeSync's Run workflow sends an execution request to the backend and displays the result in the integrated terminal.
+The editor and execution environment are connected. Click **Run**, execute the current `main.py`, and view the output directly below the editor.
 
 Example:
 
@@ -138,27 +123,87 @@ Hello from CodeSync!
 Exit code: 0
 ```
 
-Errors are surfaced through stderr so the same workspace can support an edit → run → debug workflow.
+### Room-Based Collaboration
 
-> **Security note:** Public production deployments should isolate untrusted code execution in a sandbox/container with strict CPU, memory, filesystem, network, and execution-time limits. An unrestricted host Python process should not be exposed to arbitrary users.
+Each collaboration session is associated with a room ID. Share the room link with another participant and join the same workspace.
 
-## Product Highlights
+### Connection State
 
-### Shared Editor
+The UI exposes the WebSocket connection state so users can immediately see whether the collaboration session is connected or offline.
 
-Monaco Editor provides a familiar developer experience with syntax highlighting, line numbers, keyboard navigation, themes, and editor controls.
+---
 
-### Live Collaboration
+## Architecture
 
-Code changes, presence, cursor positions, and selections can be synchronized through the WebSocket connection.
+```text
+                         CODE SYNC
+                            │
+             ┌──────────────┴──────────────┐
+             │                             │
+        FRONTEND                         BACKEND
+             │                             │
+      React + Vite                  Node.js + TypeScript
+             │                             │
+       Monaco Editor                    Express
+             │                             │
+             └──────── WebSocket ──────────┘
+                            │
+                 ┌──────────┴──────────┐
+                 │                     │
+          Collaboration State     Code Execution
+                 │                     │
+              Rooms                Python Runner
+                 │                     │
+        Users / Cursors          stdout / stderr
+```
 
-### Integrated Terminal
+---
 
-Execution results appear directly below the editor, keeping editing and debugging in one workspace.
+## Real-Time Event Model
 
-### Room-Based Sessions
+The collaboration server communicates through WebSocket events such as:
 
-A room ID creates a focused collaboration boundary that can be shared with other participants.
+```text
+join
+state
+code-change
+users
+cursor-change
+cursor-clear
+run
+run-result
+error
+```
+
+This event-driven model keeps the editor, presence state, cursor state, and execution workflow synchronized without relying on page refreshes or polling for the core collaboration path.
+
+---
+
+## Tech Stack
+
+### Frontend
+
+- React 19
+- TypeScript
+- Vite
+- Monaco Editor
+- WebSocket API
+- Yjs / Y-WebSocket
+- React Router
+- Lucide React
+- Axios
+
+### Backend
+
+- Node.js
+- TypeScript
+- Express
+- WebSocket (`ws`)
+- Execa
+- CORS
+- dotenv
+
+---
 
 ## Project Structure
 
@@ -167,6 +212,7 @@ CodeSync/
 ├── client/
 │   ├── src/
 │   │   ├── App.tsx
+│   │   ├── App.css
 │   │   └── ...
 │   ├── package.json
 │   └── ...
@@ -181,16 +227,18 @@ CodeSync/
 └── README.md
 ```
 
+---
+
 ## Run Locally
 
-### 1. Clone
+### Clone the repository
 
 ```bash
 git clone https://github.com/deekshitaa1/CodeSync.git
 cd CodeSync
 ```
 
-### 2. Start the backend
+### Start the backend
 
 ```bash
 cd server
@@ -198,7 +246,7 @@ npm install
 npm run dev
 ```
 
-### 3. Start the frontend
+### Start the frontend
 
 Open another terminal:
 
@@ -208,75 +256,96 @@ npm install
 npm run dev
 ```
 
-Open the Vite URL shown in the terminal.
+Open the Vite URL displayed in the terminal.
 
-### 4. Test collaboration
+### Test collaboration
 
 1. Open CodeSync in two browser windows.
-2. Use the same room ID in both windows.
-3. Enter different names.
+2. Enter the same room ID in both windows.
+3. Use different names.
 4. Edit `main.py` in either window.
-5. Verify code, collaborator presence, and cursor activity.
-6. Click **Run** to execute the current Python code.
+5. Verify that code changes appear in the other window.
+6. Move the cursor or select code to verify collaboration awareness.
+7. Click **Run** and inspect the terminal output.
 
-## Engineering Focus
+---
 
-This project demonstrates practical engineering beyond UI development:
+## Demo
 
-- Real-time client-server communication
-- WebSocket event design
-- Shared state synchronization
-- Multi-user presence
-- Remote cursor rendering with Monaco decorations
-- Asynchronous process execution
-- Full-stack TypeScript development
+**Live application:** [codesync-1-goz9.onrender.com](https://codesync-1-goz9.onrender.com/)
+
+**Repository:** [github.com/deekshitaa1/CodeSync](https://github.com/deekshitaa1/CodeSync)
+
+### Recommended Demo Sequence
+
+The clearest way to demonstrate CodeSync is:
+
+1. Create a room.
+2. Open the same room in a second browser window.
+3. Join with two different names.
+4. Show both users connected.
+5. Edit the Python code from one window.
+6. Show the change appearing in the second window.
+7. Move the cursor / select code to demonstrate live collaboration awareness.
+8. Run the program.
+9. Show the terminal output and an error case.
+
+> Add the project demo video or GIF above this section when you have the final video URL.
+
+---
+
+## Engineering Highlights
+
+This project demonstrates practical full-stack engineering across:
+
+- Real-time WebSocket communication
+- Multi-user room management
+- Shared application state
+- Cursor and selection synchronization
+- Monaco Editor integration
 - React state and lifecycle management
-- Connection lifecycle handling
-- Error and execution-result handling
-- Production-oriented security considerations for code execution
+- Asynchronous server-side process execution
+- stdout / stderr / exit-code handling
+- Connection and disconnection lifecycle handling
+- Full-stack TypeScript development
+
+---
+
+## Security Consideration
+
+Code execution is intentionally highlighted as an architectural concern. A public production deployment should execute untrusted code inside an isolated sandbox or container with strict CPU, memory, filesystem, network, and execution-time limits.
+
+---
 
 ## Roadmap
 
 - [ ] Sandboxed code execution
 - [ ] Multi-language execution
-- [ ] Persistent project/file storage
 - [ ] Multiple files per room
+- [ ] Persistent project storage
 - [ ] Authentication and authorization
 - [ ] Room access controls
 - [ ] Chat and activity feed
-- [ ] Stronger CRDT-based collaborative editing
+- [ ] Stronger CRDT-based collaboration
 - [ ] Execution history
 - [ ] Resource limits and execution quotas
 - [ ] Automated tests and CI/CD
 
-## Demo
-
-**Live application:** Add your deployed frontend URL here.
-
-**Backend:** https://codesync-server-ec9a.onrender.com
-
-**Repository:** https://github.com/deekshitaa1/CodeSync
-
-## Demo Video
-
-Add the demo video or GIF here. The strongest demo sequence is:
-
-1. Create a room.
-2. Open the same room in a second browser window.
-3. Show both users connected.
-4. Edit code from one window and show the change appearing in the other.
-5. Move the cursor or select code to demonstrate collaboration awareness.
-6. Run the program.
-7. Show terminal output and an error-handling example.
+---
 
 ## Author
 
-**Deekshita Rajesh Naik**
-
+**Deekshita Rajesh Naik**  
 Computer Science & Engineering (Data Science) | AI/ML | Full-Stack Development
 
-GitHub: https://github.com/deekshitaa1
+[GitHub](https://github.com/deekshitaa1)
 
 ---
 
-If you find CodeSync useful, consider starring the repository or opening an issue with feedback.
+<div align="center">
+
+**CodeSync — one room, one editor, one shared coding session.**
+
+[Open Live Demo](https://codesync-1-goz9.onrender.com/) · [View Source](https://github.com/deekshitaa1/CodeSync)
+
+</div>
